@@ -210,14 +210,8 @@ typedef unsigned char u08;
 #define PTT         PD0
 #define SHIFTKEY    PD1
 #define ROTKEY      PD2
-
-#ifdef TESTING
-#define CLKMASK     0x08
-#define DATAMASK    0x10
-#else   
-#define CLKMASK     PD3
-#define DATAMASK    PD4
-#endif
+#define CLKMASK     (1<<PD3)
+#define DATAMASK    (1<<PD4)
 
 // LCD
 #define LCD_D7      PB7
@@ -227,20 +221,20 @@ typedef unsigned char u08;
 #define LCD_RS      PB1
 #define LCD_E       PB0
 
+// LCD commands (HD44780)
 #define dispCLEAR   0x01
 #define dispHOME    0x02
-#define dispMODE    0x06 // left to right + shift cursor
-#define dispONOF    0x0C // dispi-on + no cursor + no blink
-#define dispSHIF    0x18 // 2 Line+dir + n.c. + n.c.
-#define dispFUNC    0x20 // 4bit  + 2line + size + n.c. + n.c.
-#define dispCGRA    0x40 // <5 bit adr> // for custom chars
-#define dispDDRA    0x80 // <6 bit adr>
+#define dispMODE    0x06 // left to right + shift cursor        (init)
+#define dispONOF    0x0C // dispi-on + no cursor + no blink     (init)  
+#define dispSHIF    0x18 // 2 Line+dir + n.c. + n.c.            (init)
+#define dispFUNC    0x20 // 4bit  + 2line + size + n.c. + n.c.  (init)
+#define dispCGRA    0x40 // <5 bit adr>                         (define custom chars)
+#define dispDDRA    0x80 // <6 bit adr>                         (cursor addresssing)
 
 // read status : RS=0, RW=0 bit 7 is busyflag
 // write data  : RS=1, RW=1 <8 bit data>
 // read  data  : RS=1, RW=0 <8 bit data>
 // }}}
-
 #ifdef TESTING
 // {{{ All of these should be removed
 
@@ -250,23 +244,31 @@ void _delay_ms(int s) {}
 
 // }}}
 #endif
-// {{{ Globals
+// {{{ Function Prototypes
 
+void updateDisplay(void);
 void showTrx(void);
 void setFreq(long int f);
 void initPLL(void);
 void initLCD(void);
 void initADC(void);
-void deInit(void);
+void deFrame(void);
 void lcdCmd(char c);
 void lcdData(char c);
+void lcdHome(void);
+void lcdNib(char);
 void setPLL(long int c);
 void setMuted(void);
 void showFrequency(int r, int f);
+void lcdStr(char *s);
+
+// }}}
+// {{{ Globals
 
 #ifdef TESTING
 int goingUp;                // tmp global
 int LoopCounter;            // tmp global
+int cpos;                   // display: lineair cursor position
 #endif
 int currentTime;            // tmp global
 int prevStepTime;
@@ -276,25 +278,27 @@ unsigned char GClkPrev;     // used for rotary dial handling
 unsigned char GQdPrev;      // used for rotary dial handling
 unsigned char GQd;          // used for rotary dial handling
 
-int LowPass;                // Variable for S-meter lowpass filter
-int Transmitting;           // boolean: TX = true, RX = false;
-int Scanning;               // boolean: scanning = true;
-int Muted;                  // boolean: TRUE=audio muted, FALSE=audio on 
-int ShiftEnable;            // boolean: shifted = true;
-int ReverseShift;           // boolean: swap transmit and receive frequencies
-int LargeStepEnable;        // boolean: channel steps are 10x as big
-int FrequencyShift;         // size of frequency shift
-int MuteLevel;              // level below which audio muting is enabled
-int CTCSSenable;            // boolean: CTCSS tone enabled during transmit
-int CTCSSfrequency;         // frequency of CTCSS tone to use
+unsigned char DisplayDirty; // indicates the display buffer has been updated
+
+int  LowPass;               // Variable for S-meter lowpass filter
+char Transmitting;          // boolean: TX = true, RX = false;
+char Scanning;              // boolean: scanning = true;
+char Muted;                 // boolean: TRUE=audio muted, FALSE=audio on 
+char ShiftEnable;           // boolean: shifted = true;
+char ReverseShift;          // boolean: swap transmit and receive frequencies
+char LargeStepEnable;       // boolean: channel steps are 10x as big
+int  FrequencyShift;        // size of frequency shift
+int  MuteLevel;             // level below which audio muting is enabled
+char CTCSSenable;           // boolean: CTCSS tone enabled during transmit
+int  CTCSSfrequency;        // frequency of CTCSS tone to use
 long DialFrequency;         // frequency as set by dial
 long CurrentFrequency;      // frequency setting sent to synthesizer
 long ScanStartFrequency;    // duh...
 long ScanEndFrequency;      // duh...
 long PllReferenceFrequency; // duh...
-int  DirectMenuReturn;       // When true: exit the menu upon a value selection.
+char DirectMenuReturn;      // When true: exit the menu upon a value selection.
 char Line[DISPLAY_WIDTH+10];
-char DisplayBuffer[LINECOUNT][DISPLAY_WIDTH+10];
+char DisplayBuffer[LINECOUNT][DISPLAY_WIDTH+5];
 
 // Menu
 // 
@@ -352,7 +356,7 @@ int refFreqPLL[] = { 13000, 12000, 10700, -1 };
 int refFreqIndex;
 
 #ifdef TESTING
-int theMainEvent;
+int  theMainEvent;
 char GetcBuffer;
 int  GetcAvail;
 struct termios orig_termios;
@@ -363,16 +367,16 @@ FILE *dbg;
 
 // input states controls
 #ifdef TESTING
-int vInRotState;
-int vInputStateRotary;
+char vInRotState;
+char vInputStateRotary;
 int S;
 #endif
-int inputStateRotary;
-int inputStateSelector;
-int inputStateShift;
-int inputStatePTT;
-int inputStateSMeter;
-int inputStateLargeStep;
+char inputStateRotary;
+char inputStateSelector;
+char inputStateShift;
+char inputStatePTT;
+char inputStateSMeter;
+char inputStateLargeStep;
 
 // }}}
 // {{{ Initialisation
@@ -381,45 +385,66 @@ int inputStateLargeStep;
 void initLCD(void)
 {
 #ifdef TESTING
-    deInit();
+    deFrame();
     showTrx();
 #endif
-    int i,j;
 
+    // allow the lcd controller to wake up
+    _delay_ms(100);
+
+    // depending on intial state:
+    // ... force to state 1 or state 3
+    lcdNib(0x30);
+    _delay_ms(10);
+
+    // ... and force to state 1
+    lcdNib(0x30);
+    _delay_ms(10);
+   
     // 4 bits mode, 2 lines
-    lcdCmd(0x20);
+    lcdCmd(dispFUNC); // 0x20
     _delay_ms(10);
 
-    lcdCmd(0x20);
-    _delay_ms(10);
+    //lcdCmd(dispFUNC);
+    //_delay_ms(10);
 
     // cursor shifts to right, text no shift
-    lcdCmd(0x18);
+    lcdCmd(dispSHIF); // 0x18
     _delay_ms(20);
 
     // display on, no cursor, no blink
-    lcdCmd(0x0c);
+    lcdCmd(dispONOF); // 0x0C
     _delay_ms(20);
 
     // shift mode
-    lcdCmd(0x06);
-    _delay_ms(20);
-
-    // home
-    lcdCmd(0x02);
+    lcdCmd(dispMODE); // 0x06
     _delay_ms(20);
 
     // clear display
-    lcdCmd(0x01);
+    // leave cursor at top left
+    lcdCmd(dispCLEAR); // 0x01
     _delay_ms(20);
 
+/*
     // define custom chars
-    lcdCmd(0x40);
-    for (i=0; i<3; i++) {
-        for (j=0; j<8; j++) {
+    int i,j;
+    lcdCmd(dispCGRA);
+    for (i=0; i<3; i++) 
+    {
+        for (j=0; j<8; j++) 
+        {
             lcdData(smeter[i][j]);
         }
     }
+*/
+
+    // welcome message 
+    lcdHome();
+    _delay_ms(20);
+    
+    //              0123456789ABCDEF
+    char hello[] = "PA3BJI sw v0.5 ";
+    lcdStr(hello);
 }
 
 
@@ -463,8 +488,10 @@ void initIRQ(void)
 {
 #ifdef TESTING
 #else
-    EIMSK |= _BV(INT1);
-    EICRA |= _BV(ISC11);
+
+    /*
+       EIMSK |= _BV(INT1);
+       EICRA |= _BV(ISC11);
 
     // Setup Timer 1
     TCCR1A = 0x00;				// Normal Mode 
@@ -476,6 +503,7 @@ void initIRQ(void)
 
     // enable interrupts
     sei();
+     */
 #endif
 }
 
@@ -524,7 +552,7 @@ void initialize(void)
     initPLL();
     initLCD();
     initADC();
-    initIRQ();
+    initIRQ(); // for now: do nothing
 
 #ifdef TESTING
     vInRotState = 9;
@@ -539,24 +567,35 @@ void initialize(void)
 #ifdef TESTING
 // {{{ Scaffolding
 
-void setCursorPosition(int x, int y);
+// {{{ ttyControl
 
-// {{{ Display emulator
+// {{{ void ttySetCursorPosition(int row, int col)
 
-// {{{ deClearScreen
+void ttySetCursorPosition(int row, int col)
+{
+    printf("\033[%d;%df",row+1, col+1);
+}
 
-void deClearScreen(void)
+// }}}
+// {{{ void ttyClearScreen(void)
+
+void ttyClearScreen(void)
 {
     printf("\033[2J");
     printf("\033[?1h");
 }
 
 // }}}
+
+// }}}
+
+// {{{ Display emulator
 // {{{ deSetCursorPosition
 
 void deSetCursorPosition(int row, int col)
 {
-    printf("\033[%d;%df",row,col);
+    cpos = row*16  + col;
+    ttySetCursorPosition(row+YTop, col+XTop);
 }
 
 // }}}
@@ -564,15 +603,7 @@ void deSetCursorPosition(int row, int col)
 
 void deTop(void)
 {
-    deSetCursorPosition(1,1);
-}
-
-// }}}
-// {{{ deCmd
-
-void deCmd(char c)
-{
-
+    deSetCursorPosition(0,0);
 }
 
 // }}}
@@ -580,12 +611,64 @@ void deCmd(char c)
 
 void deData(char c)
 {
+    printf("%c",c);
+    cpos++; 
+    if (cpos==16)
+        deSetCursorPosition(2,1);
 }
 
 // }}}
-// {{{ deInit()
+// {{{ deClearScreen
 
-void deLineH(int w)
+void deClearScreen(void)
+{
+    int i;
+    deTop();
+    for (i=0; i<16; i++)
+    {
+        deData(' ');
+    }
+    deSetCursorPosition(1,0); 
+    for (i=0; i<16; i++)
+    {
+        deData(' ');
+    }
+    
+    for (i=0; i<16; i++)
+    {
+        DisplayBuffer[0][i]=' ';
+        DisplayBuffer[1][i]=' ';
+    }
+}
+
+// }}}
+// {{{ deCmd
+
+void deCmd(char c)
+{
+    int pos;
+
+    if (c == dispCLEAR)
+    {
+        deClearScreen();
+    }
+
+    if ((c & 0xFE) == dispHOME) 
+    {
+        deTop();
+    }
+
+    if ((c & 0x80) == dispDDRA)
+    {
+        pos = c & 0x7F;
+        deSetCursorPosition((pos/16)+1 , (pos%16)+1);
+    }
+}
+
+// }}}
+// {{{ deFrame()
+
+void deLine(int w)
 {
     int i;
     printf("+");
@@ -594,43 +677,27 @@ void deLineH(int w)
     printf("+");
 }
 
-void deInit(void)
+void deFrame(void)
 {
     int y;
 
     // cursor off
     printf("\033[?25l");   
 
-    deSetCursorPosition(YTop-1, XTop-1);
-    deLineH(DE_WIDTH+1);
-    deSetCursorPosition(YTop+DE_HEIGHT, XTop-1);
-    deLineH(DE_WIDTH+1);
+    deSetCursorPosition(-1, -1);
+    deLine(DE_WIDTH+1);
     for (y=0; y<DE_HEIGHT; y++)
     {
-        deSetCursorPosition(YTop+y, XTop-1);
+        deSetCursorPosition(y, -1);
         printf("|");
-        deSetCursorPosition(YTop+y, XTop+DE_WIDTH);
+        deSetCursorPosition(y, DE_WIDTH);
         printf("|");
     }
+    deSetCursorPosition(DE_HEIGHT, -1);
+    deLine(DE_WIDTH+1);
 }
 
 // }}}
-// }}}
-
-// {{{ void clearScreen(void)
-
-void clearScreen(void)
-{
-    deClearScreen();
-}
-
-// }}}
-// {{{ void top(void)
-
-void top(void)
-{
-    deTop();
-}
 
 // }}}
 
@@ -646,7 +713,6 @@ char* yesno(int boolean)
 }
 
 // }}}
-
 // {{{ Input Scaffolding
 
 #ifdef TESTING
@@ -721,6 +787,7 @@ void FHEungetc(char c)
 #endif
 
 // }}}
+
 // }}}
 #endif
 // {{{ input functions
@@ -754,7 +821,7 @@ int bounce(int clock, int data, int bounceSelect, int newState)
 
     // after 4 times stop bouncing and return the true values
     //if (bounceCount > 4)
-        rv = (clock | data);
+    rv = (clock | data);
 
     // rv = rv & 3; 
     // S = rv;
@@ -767,7 +834,7 @@ int bounce(int clock, int data, int bounceSelect, int newState)
         vInRotState = newState;
     }
 #ifdef DBG_LOGGING
-   fprintf(dbg,"%02x ",rv);
+    fprintf(dbg,"%02x ",rv);
 #endif
     return rv;
 }
@@ -847,7 +914,7 @@ void getInputRotary(void)
             vInRotState = 9;
             break;
     }
-    
+
 #ifdef DBG_LOGGING
     fprintf(dbg, "i-%02x ",input);
 #endif
@@ -862,24 +929,24 @@ void getInputRotary(void)
     //   0 1 2 3 4 5 6 7 8 9
     // =========================
 #endif
-//                        +----------------------> rising edge -> frequency step
-//                        |
-//         double         |           positive
-//      edge triggerd     |        edge triggered
-//        +-------+       |           +-------+
-// DATA---| D   Q |--(Qd)-+     DATA--| D   Q |--> UpDown
-// CLK-+--|>      |         +---------|>      |
-//     |  |    /Q |         |         |    /Q |
-//     |  +-------+         |         +-------+
-//     +--------------------+
-//
-// Given a 90 degrees out of phase DATA and CLOCK signal that both
-// have bounce during the level change, Qd will be a cleaned up clock signal.
-// Using this cleaned up CLOCK (Qd), a single frequency step per cycle can be guaranteed, 
-// regardless of bouncing contacts.
-// Using the rising edge of CLOCK to sample the DATA in its stable periods will 
-// provide a clean UpDown signal.
-// On the rising Qd edge, the UpDown signal differentiates between rotate up and rotate down
+    //                        +----------------------> rising edge -> frequency step
+    //                        |
+    //         double         |           positive
+    //      edge triggerd     |        edge triggered
+    //        +-------+       |           +-------+
+    // DATA---| D   Q |--(Qd)-+     DATA--| D   Q |--> UpDown
+    // CLK-+--|>      |         +---------|>      |
+    //     |  |    /Q |         |         |    /Q |
+    //     |  +-------+         |         +-------+
+    //     +--------------------+
+    //
+    // Given a 90 degrees out of phase DATA and CLOCK signal that both
+    // have bounce during the level change, Qd will be a cleaned up clock signal.
+    // Using this cleaned up CLOCK (Qd), a single frequency step per cycle can be guaranteed, 
+    // regardless of bouncing contacts.
+    // Using the rising edge of CLOCK to sample the DATA in its stable periods will 
+    // provide a clean UpDown signal.
+    // On the rising Qd edge, the UpDown signal differentiates between rotate up and rotate down
 
 #ifdef TESTING
     sample = input;
@@ -889,7 +956,7 @@ void getInputRotary(void)
 #endif
 
     /* isolate clock and data signals           */
-    clk = (sample & CLKMASK) == 0;
+    clk  = (sample & CLKMASK ) == 0;
     data = (sample & DATAMASK) == 0;
 
 #ifdef DBG_LOGGING
@@ -913,11 +980,11 @@ void getInputRotary(void)
 
     /* Positive edge triggered D-flipflop       */ 
     /* creates  a directional value  (UpDown)   */
- 
+
     /* Trigger only on rising edge (CLK)        */
     if (clk && !GClkPrev) 
     {                    
-    /* The data signal is stable at this moment */
+        /* The data signal is stable at this moment */
         UpDown = data;
     }
 
@@ -960,25 +1027,25 @@ void getInputSelector(void)
         }
     }
 #else
-    
-	// rotary button pushed?
-	if (!(PIND & (1<<ROTKEY))) 
+
+    // rotary button pushed?
+    if (!(PIND & (1<<ROTKEY))) 
     {
-		for (c=0;;c++) 
+        for (c=0;;c++) 
         {
-			_delay_ms(200);// $$$ FHE TODO bounce suppressor (get rid of this) 
-			// wait for button released
-			if ((PIND & (1<<ROTKEY))) 
+            _delay_ms(200);// $$$ FHE TODO bounce suppressor (get rid of this) 
+            // wait for button released
+            if ((PIND & (1<<ROTKEY))) 
             {
-				_delay_ms(200);// $$$ FHE TODO delay loop (get rid of this)
-				break;
-			}
-		}
-		if (c>5)
-			inputStateSelector = LARGEEVENT;
-		else
-			inputStateSelector = SELECTEVENT;
-	}
+                _delay_ms(200);// $$$ FHE TODO delay loop (get rid of this)
+                break;
+            }
+        }
+        if (c>5)
+            inputStateSelector = LARGEEVENT;
+        else
+            inputStateSelector = SELECTEVENT;
+    }
 
 #endif
 }
@@ -1148,6 +1215,16 @@ void lcdCmd(char c)
 }
 
 // }}}
+
+// {{{ void lcdHome(void)
+
+void lcdHome(void)
+{
+    lcdCmd(dispHOME);
+    _delay_ms(20);
+}
+
+// }}}
 // {{{ void lcdData(char c)
 
 void lcdData(char c)
@@ -1177,34 +1254,41 @@ void lcdStr(char *s)
 }
 
 // }}}
+// {{{ void lcdStr16(char *s)
 
-// {{{ void setCursorPosition(int row, int col)
-
-void setCursorPosition(int row, int col)
+void lcdStr16(char *s)
 {
-#ifdef TESTING
-    deSetCursorPosition(row+YTop, col+XTop);
-#else
-#endif
+    int i=16;
+    while (i--)
+        lcdData(*s++);
 }
 
 // }}}
+
 // }}}
 
 // {{{ void updateDisplay(void)
 
 void updateDisplay(void)
 {
+#ifdef TESTING
+    // set color to blue
     printf("\033[34m");
-    setCursorPosition(0,0);
-    printf("%-16s", DisplayBuffer[0]);
-    setCursorPosition(1,0);
-    printf("%-16s", DisplayBuffer[1]);
+#endif
+    lcdHome();
+    lcdStr16(DisplayBuffer[0]);
+#ifdef TESTING
+    deSetCursorPosition(1,0);
+#endif
+    lcdStr16(DisplayBuffer[1]);
+    DisplayDirty = FALSE;
+#ifdef TESTING
+    // reset color to black
     printf("\033[30m");
+#endif
 }
 
 // }}}
-
 // {{{ void outputTrxBit(void) 
 
 void outputTrxBit(void)
@@ -1226,6 +1310,7 @@ void outputTrxBit(void)
 void setDisplay(int row, char *string)
 {
     strcpy(DisplayBuffer[row], string);
+    DisplayDirty = TRUE;
 }
 
 // }}}
@@ -1270,7 +1355,10 @@ void setMuted()
         sbi(PORTC, MUTE);
         // Only show the 'M' symbol in the S-Meter during regular receive mode
         if ((menuLoopState == TUNING) && (!Transmitting))
+        {
             DisplayBuffer[1][0] = 'M';
+            DisplayDirty = TRUE;
+        }
     }
     else
         // clear output mute bit
@@ -1304,6 +1392,7 @@ void showCTCSSfreq(char *prompt)
 void showTrx(void)
 {
     DisplayBuffer[1][DISPLAY_WIDTH-1] = (Transmitting) ? 'T' : 'R';
+    DisplayDirty = TRUE;
 }
 
 // }}}
@@ -1318,10 +1407,12 @@ void showSMeter(void)
     DisplayBuffer[1][inputStateSMeter/2] = ((inputStateSMeter%2)==0) ? '\'' : '"';
     DisplayBuffer[1][(inputStateSMeter/2)+1] = ' ';
 #else
+#if FALSE
     short n = 15;
     int level = inputStateSMeter;
 
-    lcdCmd(0xc0);
+    //lcdCmd(0xc0);
+    lcdCmd(dispDDRA + 0x40);
 
     // chars in the full bar are 3 lines
     level >>= 1;
@@ -1351,6 +1442,7 @@ void showSMeter(void)
     while (--n > 0) 
         lcdData(' ');
 #endif
+#endif
 }
 
 // }}}
@@ -1359,6 +1451,7 @@ void showSMeter(void)
 void clearSMeter(void)
 {
     sprintf(DisplayBuffer[1],"%*s",DISPLAY_WIDTH," ");
+    DisplayDirty = TRUE;
 }
 
 // }}}
@@ -1423,7 +1516,7 @@ void showMenuItem()
         case MBACK :
         case MSCAN :
         case MSETTINGS :
-            sprintf(Line,"> %-*s",DISPLAY_WIDTH-14, menuStrings[menuLoopState & STATEMASK]);
+            sprintf(Line,"> %-*s",DISPLAY_WIDTH-2, menuStrings[menuLoopState & STATEMASK]);
             break;
 
         default : 
@@ -1648,8 +1741,8 @@ void mainLoop(void)
 
                 // suppress frequency change during transmit
                 if (Transmitting) inputStateRotary = IDLE;
-        
-            
+
+
                 switch (inputStateRotary)
                 {
                     case UPEVENT :
@@ -2201,7 +2294,7 @@ void mainLoop(void)
         // $$$ FHE TODO
 #endif
         // }}}
-// {{{ squelch
+        // {{{ squelch
 
         if ((!Transmitting) && (menuLoopState == TUNING)) 
             showSMeter();
@@ -2211,7 +2304,7 @@ void mainLoop(void)
         Muted = (inputStateSMeter < MuteLevel);
         setMuted();
 
-// }}}
+        // }}}
 
         updateDisplay();
 
@@ -2221,7 +2314,7 @@ void mainLoop(void)
 
         if (TRUE)
         {
-            deSetCursorPosition(DBGROW,1);
+            ttySetCursorPosition(DBGROW,1);
             printf("\033[37m"); // light gray
             printf("========================= debug ========================\r\n");
             printf("CTCSSenable     =      %3s  | ",yesno(CTCSSenable));
@@ -2284,8 +2377,8 @@ int main(int argc, char *argv[])
     // {{{ testing
 
 #ifdef TESTING
-    deClearScreen();
-    deSetCursorPosition(1,1);
+    ttyClearScreen();
+    ttySetCursorPosition(0,0);
     printf("========= 23cm NBFM control software simulator =========\n");
     printf("\n");
     printf("q quit\n"); 
@@ -2321,8 +2414,5 @@ int main(int argc, char *argv[])
     // }}}
 }
 
-// }}}
-
-// {{{
 // }}}
 // EOF
