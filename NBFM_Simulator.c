@@ -46,6 +46,7 @@
 #define INITIAL_SHIFT       -28         // in MHz
 #define INITIAL_CTCSS       0           // in cHz
 #define INITIAL_MUTELEVEL   5           // scalar
+#define INITIAL_REFERENCE   12000UL     // in kHz
 #define CHANNELSTEP         25          // in kHz
 #define LARGESTEP           1000        // in kHz
 #define BANDBOTTOM          1240000UL   // in kHz
@@ -57,6 +58,7 @@
 #define CLKMASK             1
 #define DATAMASK            2
 
+// {{{ input events
 #define IDLE                -10
 #define UPEVENT             1
 #define DOWNEVENT           2
@@ -65,33 +67,58 @@
 #define SELECTEVENT         5
 #define SHIFTEVENT          6
 #define LARGEEVENT          7
+// }}}
 
-#define MMUTELEVEL          0 
-#define MSHIFT              1
-#define MCTCSS              2
-#define MSSTART             3
-#define MSEND               4
-#define MSCAN               5
-#define MBACK               6
-#define MOFF                100
-#define MMUTELEVELVAR       (MMUTELEVEL+200)
-#define MSHIFTVAR           (MSHIFT+MMUTELEVELVAR)
-#define MCTCSSVAR           (MCTCSS+MMUTELEVELVAR)
-#define MSSTARTVAR          (MSSTART+MMUTELEVELVAR)
-#define MSENDVAR            (MSEND+MMUTELEVELVAR)
+// {{{ States
+
+// Lower 6 bits are for state indicator (64 state range)
+// Higher order 10 bites are for type indicator (1024 types range)
+
+#define STATEMASK           0x002F
+#define TYPEMASK            0xFFC0
+
+#define TUNING              0
+// {{{ Main menu select states
+#define MAINMENU            64
+#define MMUTELEVEL          (MAINMENU+0)
+#define MSHIFT              (MAINMENU+1)
+#define MCTCSS              (MAINMENU+2)
+#define MSSTART             (MAINMENU+3)
+#define MSEND               (MAINMENU+4)
+#define MSCAN               (MAINMENU+5)
+#define MSETTINGS           (MAINMENU+6)
+#define MBACK               (MAINMENU+7)
+#define MAINMENU_END        (MAINMENU+7)
+// }}}
+// {{{ Main menu value states
+#define MAINMENU_VAL        128
+#define MMUTELEVELVAR       (MAINMENU_VAL+0)
+#define MSHIFTVAR           (MAINMENU_VAL+1)
+#define MCTCSSVAR           (MAINMENU_VAL+2)
+#define MSSTARTVAR          (MAINMENU_VAL+3)
+#define MSENDVAR            (MAINMENU_VAL+4)
+#define MAINMENU_VAL_END    (MAINMENU_VAL+4)
+// }}}
+// {{{ Submenu states
+#define SUBMENU1            192
+#define MARETURNMODE        (SUBMENU1+0)
+#define MAREFFREQ           (SUBMENU1+1)
+#define SUBMENU1_END        (SUBMENU1+1)
+// }}}
+// {{{ Submenu value states
+#define SUBMENU1_VAL        256
+#define MARETURNMODEVAR     (SUBMENU1_VAL+0)
+#define MAREFFREQVAR        (SUBMENU1_VAL+1)
+#define SUBMENU1_VAL_END    (SUBMENU1_VAL+1)
+// }}}
+
+// }}} States
 
 #define MAXMUTELEVEL        32
 #define MINSHIFT            -60
 #define MAXSHIFT            60
 #define MINCTCSS            10
 #define MAXCTCSS            90
-/*
-#define 
-#define 
-#define 
-#define 
-#define 
- */
 
 #ifdef TESTING
 #define DE_WIDTH    16
@@ -100,6 +127,7 @@
 #define XTop        21
 #define DBGROW      14
 #endif
+
 // }}}
 // {{{ defines for ATMEGA328 
 #ifdef TESTING
@@ -227,20 +255,23 @@ int CTCSSfrequency;         // frequency of CTCSS tone to use
 int ScanStartFrequency;     // duh...
 int ScanEndFrequency;       // duh...
 long PllReferenceFrequency; // duh...
-
+int DirectMenuReturn;       // When true: exit the menu upon a value selection.
 char Line[DISPLAY_WIDTH+1];
 char DisplayBuffer[LINECOUNT][DISPLAY_WIDTH+1];
 
 // Menu
 // 
+#define MENULENGTH 8
 char *menuStrings[] = { 
+  // 01234567890123456
     "Mute level",       // 0
     "Shift",            // 1
     "CTCSS",            // 2
     "Scan Start",       // 3
     "Scan End",         // 4
     "Scan",             // 5
-    "back"};            // 6
+    "Settings",         // 6
+    "Back"};            // 7
 
 int  menuValues [] =  {  
     INITIAL_MUTELEVEL,  // 0
@@ -249,10 +280,21 @@ int  menuValues [] =  {
     1280000,            // 3
     1290000,            // 4
     0,                  // 5
-    0};                 // 6
+    0,                  // 6
+    0};                 // 7
 
+#define SUBMENULENGTH 2
+char *subMenuStrings[] = {
+  // 01234567890123456
+    "Direct ret",       // 0
+    "PLL Ref"           // 1
+};
 
-#define MENULENGTH 7
+int subMenuValues [] = {
+    TRUE,               // 0
+    INITIAL_REFERENCE   // 1
+};
+
 int menuLoopState;
 
 // define S-meter chars
@@ -262,8 +304,6 @@ unsigned char smeter[3][8] = {
     {0b00000,0b00000,0b10101,0b10101,0b10101,0b10101,0b00000,0b00000}
 };
 
-
-
 // rotary
 int GClkPrev;
 int GQdPrev;
@@ -271,9 +311,14 @@ int input;
 // /rotary
 
 //CTCSS frequencies
-int CtcssTones[] = {0,670,719,755,770,797,825,854,885,915,948,974,-1};
+int CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
+    1000,1035,1072,1109,1148,1188,1230,1273,1318,1365,1413,1462,1514,1567,1598,
+    1622,1655,1679,1713,1738,1773,1799,1835,1862,1899,1928,1966,1995,2035,2065,
+    2107,2181,2257,2291,2336,2418,2503,2541, -1};
 int ctcssIndex;
 
+int refFreqPLL[] = { 13000, 12000, 10700, -1 };
+int refFreqIndex;
 
 #ifdef TESTING
 int theMainEvent;
@@ -391,7 +436,7 @@ void initialize(void)
     ShiftEnable = FALSE;
     ReverseShift = FALSE;
     Transmitting = FALSE;
-    menuLoopState  = MOFF;
+    menuLoopState  = TUNING;
     inputStateRotary = IDLE;
     inputStateSelector= IDLE;
     inputStateShift= IDLE;
@@ -521,8 +566,10 @@ void top(void)
 
 char* yesno(int boolean)
 {
-    static char yes[]="\033[32myes\033[30m";
-    static char no[] ="\033[31m no\033[30m";
+    // green -> light gray
+    static char yes[]="\033[32myes\033[37m";
+    // red -> light gray
+    static char no[] ="\033[31m no\033[37m";
     return (boolean ? yes : no); 
 }
 
@@ -845,7 +892,7 @@ void getInputSMeter(void)
     LoopCounter++;
     if ((LoopCounter%2000) == 0)
     {
-        if (inputStateSMeter>28) goingUp = FALSE;
+        if (inputStateSMeter>26) goingUp = FALSE;
         if (inputStateSMeter<1 ) goingUp = TRUE;
 
         if (goingUp)
@@ -1066,7 +1113,7 @@ void setTransmitter(void)
 
 void  setCTCSSfreq(void)
 {
-    //  showCTCSSfreq();
+    //  showCTCSSfreq(1);
 }
 
 // }}}
@@ -1079,7 +1126,7 @@ void setMuted(int mute)
     {
         // TODO set output mute bit
         // Only show the 'M' symbol in the S-Meter during regular receive mode
-        if ((menuLoopState == MOFF) && (!Transmitting))
+        if ((menuLoopState == TUNING) && (!Transmitting))
             DisplayBuffer[1][0] = 'M';
     }
     // else
@@ -1092,17 +1139,19 @@ void setMuted(int mute)
 
 void showFrequency(int row, int fr)
 {
-    sprintf(Line, "%4u.%03u MHz   %c", fr/1000, fr%1000, (Transmitting) ? 'T' : 'R');
+    sprintf(Line, "VFO %4u.%03u MHz", fr/1000, fr%1000);
     setDisplay(row,Line);
 }
 
 // }}}
-// {{{ void showCTCSSfreq(int row)
+// {{{ void showCTCSSfreq(char *prompt)
 
-void showCTCSSfreq(int row)
+void showCTCSSfreq(char *prompt)
 {
-    sprintf(Line, "%d.%d Hz %*s", CTCSSfrequency/10,CTCSSfrequency%10,DISPLAY_WIDTH-8," ");
-    setDisplay(row, Line);
+    if (CTCSSfrequency == 0)
+        sprintf(Line, "%s%-*s", prompt, DISPLAY_WIDTH-2, "off");
+    else
+        sprintf(Line, "%s%3d.%d Hz%*s", prompt, CTCSSfrequency/10,CTCSSfrequency%10,DISPLAY_WIDTH-10," ");
 }
 
 // }}}
@@ -1110,7 +1159,7 @@ void showCTCSSfreq(int row)
 
 void showTrx(void)
 {
-    DisplayBuffer[0][DISPLAY_WIDTH-1] = (Transmitting) ? 'T' : 'R';
+    DisplayBuffer[1][DISPLAY_WIDTH-1] = (Transmitting) ? 'T' : 'R';
 }
 
 // }}}
@@ -1135,11 +1184,16 @@ void clearSMeter(void)
 
 // }}}
 
-// {{{ void bottomLinePrinter(int index)
+// {{{ void bottomLinePrinter(int index, char *prompt)
 
-void bottomLinePrinter(int index)
+void bottomLinePrinter(int index, char *prompt)
 {
-    int val = menuValues[index];
+    int val;
+
+    if (((index & TYPEMASK) == MAINMENU) || ((index & TYPEMASK) == MAINMENU_VAL))
+        val = menuValues[index & STATEMASK];
+    else
+        val = subMenuValues[index & STATEMASK];
 
     // bottom line
     switch (index)
@@ -1148,21 +1202,33 @@ void bottomLinePrinter(int index)
         case MSSTARTVAR :
         case MSEND :
         case MSENDVAR :
-            sprintf(Line, "%4u.%03u MHz", val/1000, val%1000);
+            sprintf(Line, "%s%4u.%03u MHz", prompt, val/1000, val%1000);
             break;
 
         case MCTCSS :
         case MCTCSSVAR :
-            sprintf(Line, "%3d.%d Hz%*s", val/10, val%10, DISPLAY_WIDTH-8, " ");
+            showCTCSSfreq(prompt);
+            //sprintf(Line, "%s%3d.%d Hz%*s", prompt, val/10, val%10, DISPLAY_WIDTH-10, " ");
             break;
 
         case MBACK :
         case MSCAN :
-            sprintf(Line,"%*s",DISPLAY_WIDTH, " ");
+        case MSETTINGS :
+            sprintf(Line, "%*s", DISPLAY_WIDTH, " ");
+            break;
+
+        case MARETURNMODE :
+        case MARETURNMODEVAR :
+            sprintf(Line, "%s%-*s", prompt, DISPLAY_WIDTH-3, (DirectMenuReturn) ? "yes" : "no ");
+            break;
+
+        case MAREFFREQ :
+        case MAREFFREQVAR :
+            sprintf(Line, "%s%2d.%03d MHz%*s", prompt, val/1000, val%1000, DISPLAY_WIDTH-14, " ");
             break;
 
         default : 
-            sprintf(Line, "%-*d", DISPLAY_WIDTH, val);
+            sprintf(Line, "%s%-*d", prompt, DISPLAY_WIDTH-2, val);
     }
     setDisplay(1, Line);
 }
@@ -1173,11 +1239,21 @@ void bottomLinePrinter(int index)
 void showMenuItem()
 {
     // top line
-    sprintf(Line,"> %-*s",DISPLAY_WIDTH-3, menuStrings[menuLoopState]);
+    switch (menuLoopState)
+    {
+        case MBACK :
+        case MSCAN :
+        case MSETTINGS :
+            sprintf(Line,"> %-*s",DISPLAY_WIDTH-14, menuStrings[menuLoopState & STATEMASK]);
+            break;
+
+        default : 
+            sprintf(Line,"> Set %-*s",DISPLAY_WIDTH-6, menuStrings[menuLoopState & STATEMASK]);
+    }
     setDisplay(0, Line);
 
     // bottom line
-    bottomLinePrinter(menuLoopState); 
+    bottomLinePrinter(menuLoopState,"  "); 
 }
 
 // }}}
@@ -1186,11 +1262,43 @@ void showMenuItem()
 void showMenuItemValue()
 {
     // top line
-    sprintf(Line,"Set %-*s", DISPLAY_WIDTH-5, menuStrings[menuLoopState-MMUTELEVELVAR]);
+    sprintf(Line,"  Set %-*s", DISPLAY_WIDTH-6, menuStrings[menuLoopState & STATEMASK]);
     setDisplay(0, Line);
 
     // bottom line
-    bottomLinePrinter(menuLoopState-MMUTELEVELVAR); 
+    bottomLinePrinter(menuLoopState,"> "); 
+}
+
+// }}}
+// {{{ void showSubmenu1Item(void)
+
+void showSubmenu1Item(void)
+{
+    // top line
+    switch (menuLoopState)
+    {
+        case MARETURNMODE :
+        case MAREFFREQ    :
+            sprintf(Line,"> %-*s",DISPLAY_WIDTH-2, subMenuStrings[menuLoopState & STATEMASK]);
+            break;
+    }
+    setDisplay(0, Line);
+
+    // bottom line
+    bottomLinePrinter(menuLoopState,"  "); 
+}
+
+// }}}
+// {{{ void showSubmenuItemValue()
+
+void showSubmenu1ItemValue()
+{
+    // top line
+    sprintf(Line,"  %-*s", DISPLAY_WIDTH-2, subMenuStrings[menuLoopState & STATEMASK]);
+    setDisplay(0, Line);
+
+    // bottom line
+    bottomLinePrinter(menuLoopState,"> "); 
 }
 
 // }}}
@@ -1243,13 +1351,63 @@ void setFreq(long int f)
 
 // }}}
 
+// {{{ void showItem(void)
+
+void showItem(void)
+{
+    switch (menuLoopState & TYPEMASK)
+    {
+        case MAINMENU :
+            showMenuItem();
+            break;
+        case MAINMENU_VAL:
+            showMenuItemValue();
+            break;
+        case SUBMENU1 :
+            showSubmenu1Item();
+            break;
+        case SUBMENU1_VAL:
+            showSubmenu1ItemValue();
+            break;
+    }
+}
+
+// }}}
+// {{{ int getMaxMenuIndex(void)
+
+int getMaxMenuIndex(void)
+{
+    int max;
+    switch (menuLoopState & TYPEMASK)
+    {
+        case MAINMENU : 
+            max = MAINMENU_END;
+            break;
+        case MAINMENU_VAL : 
+            max = MAINMENU_VAL_END;
+            break;
+        case SUBMENU1 : 
+            max = SUBMENU1_END;
+            break;
+        case SUBMENU1_VAL : 
+            max = SUBMENU1_VAL_END;
+            break;
+        default :
+            max = 666;
+    }
+    return max;
+}
+
+// }}}
 // {{{ void nextMenuItem(void)
 
 void nextMenuItem(void)
 {
+    int max = getMaxMenuIndex();  
+
     menuLoopState++;
-    if (menuLoopState >=  MENULENGTH) 
-        menuLoopState = MMUTELEVEL;
+    if ((menuLoopState & STATEMASK) > (max & STATEMASK))
+        menuLoopState = max & TYPEMASK;
     inputStateRotary = IDLE;
 }
 
@@ -1258,9 +1416,12 @@ void nextMenuItem(void)
 
 void prevMenuItem(void)
 {
+    int max = getMaxMenuIndex();
+
     menuLoopState--;
-    if (menuLoopState < 0) 
-        menuLoopState = MENULENGTH-1;
+    // STATEMASK is -1 in 6bit signed mode 
+    if ((menuLoopState & STATEMASK) == STATEMASK)
+        menuLoopState = max;
     inputStateRotary = IDLE;
 }
 
@@ -1297,9 +1458,9 @@ void mainLoop(void)
         // the state machine does all the processing
         switch (menuLoopState)
         {
-            // {{{ case MOFF : and input processing
+            // {{{ case TUNING : and input processing
 
-            case MOFF : // 100
+            case TUNING : // 0
 
                 // {{{ inputStateRotary
 
@@ -1376,7 +1537,7 @@ void mainLoop(void)
                 switch (inputStateSelector)
                 {
                     case SELECTEVENT :
-                        menuLoopState = MMUTELEVEL;
+                        menuLoopState = MAINMENU;
                         inputStateSelector = IDLE;
                         break;
                 }
@@ -1385,13 +1546,14 @@ void mainLoop(void)
                 // }}}
 
                 // }}}
+                // {{{ main menu item selection
                 // {{{  case MMUTELEVEL :
 
-            case MMUTELEVEL : // 0
-            case MSHIFT     : // 1
-            case MCTCSS     : // 2
-            case MSSTART    : // 3
-            case MSEND      : // 4
+            case MMUTELEVEL : 
+            case MSHIFT     : 
+            case MCTCSS     : 
+            case MSSTART    : 
+            case MSEND      : 
                 switch (inputStateRotary)
                 {
                     case UPEVENT :
@@ -1407,14 +1569,19 @@ void mainLoop(void)
                 {
                     case SELECTEVENT :
                         // switch from item selection to value selection
-                        menuLoopState += MMUTELEVELVAR;
+                        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU_VAL;
                         inputStateSelector= IDLE;
                         break;
                 }
-                if (menuLoopState<MMUTELEVELVAR) 
-                    showMenuItem();
-                else
-                    showMenuItemValue();
+                switch (menuLoopState & TYPEMASK)
+                {
+                    case MAINMENU :
+                        showMenuItem();
+                        break;
+                    case MAINMENU_VAL:
+                        showMenuItemValue();
+                        break;
+                }
                 break;
 
                 // }}}
@@ -1434,7 +1601,7 @@ void mainLoop(void)
                 switch (inputStateSelector)
                 {
                     case SELECTEVENT :
-                        menuLoopState = MOFF;
+                        menuLoopState = TUNING;
                         Scanning = !Scanning;
                         inputStateSelector= IDLE;
                         showFrequency(0, CurrentFrequency);
@@ -1444,9 +1611,9 @@ void mainLoop(void)
                 break;
 
                 // }}}
-                // {{{  case MBACK :
+                // {{{  case MSETTINGS :
 
-            case MBACK : // 6
+            case MSETTINGS : // 6
                 switch (inputStateRotary)
                 {
                     case UPEVENT :
@@ -1462,7 +1629,7 @@ void mainLoop(void)
                 switch (inputStateSelector)
                 {
                     case SELECTEVENT :
-                        menuLoopState = MOFF;
+                        menuLoopState = MARETURNMODE;
                         inputStateSelector= IDLE;
                         showFrequency(0, CurrentFrequency);
                         break;
@@ -1470,22 +1637,50 @@ void mainLoop(void)
                 break;
 
                 // }}}
+                // {{{  case MBACK :
+
+            case MBACK : // 7
+                switch (inputStateRotary)
+                {
+                    case UPEVENT :
+                        nextMenuItem();
+                        showMenuItem();
+                        break;
+
+                    case DOWNEVENT : 
+                        prevMenuItem();
+                        showMenuItem();
+                        break;
+                }
+                switch (inputStateSelector)
+                {
+                    case SELECTEVENT :
+                        menuLoopState = TUNING;
+                        inputStateSelector= IDLE;
+                        showFrequency(0, CurrentFrequency);
+                        break;
+                }
+                break;
+
+                // }}}
+                // }}}
+                // {{{ main meun value selection
                 // {{{  case MMUTELEVELVAR :
 
-            case MMUTELEVELVAR : // 200
+            case MMUTELEVELVAR : 
                 // {{{ up/down
                 switch (inputStateRotary)
                 {
                     case UPEVENT :
                         MuteLevel = (MuteLevel<MAXMUTELEVEL) ? MuteLevel+1 : MuteLevel;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = MuteLevel;
+                        menuValues[menuLoopState & STATEMASK] = MuteLevel;
                         break;
 
                     case DOWNEVENT : 
                         MuteLevel = (MuteLevel>0) ? MuteLevel-1 : 0;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = MuteLevel;
+                        menuValues[menuLoopState & STATEMASK] = MuteLevel;
                         break;
                 }
                 // }}}
@@ -1493,17 +1688,13 @@ void mainLoop(void)
                 switch (inputStateSelector)
                 {
                     case SELECTEVENT :
-                        menuLoopState = MMUTELEVEL;
+                        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
                         inputStateSelector = IDLE;
+                        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
                 // }}}
-                if (menuLoopState<MMUTELEVELVAR) 
-                    showMenuItem();
-                else
-                    showMenuItemValue();
-                break;
-
+                showItem();
                 // }}}
                 // {{{  case MSHIFTVAR :
 
@@ -1518,13 +1709,13 @@ void mainLoop(void)
                     case UPEVENT :
                         FrequencyShift = (FrequencyShift < MAXSHIFT) ? FrequencyShift+1 : MAXSHIFT;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = FrequencyShift;
+                        menuValues[menuLoopState & STATEMASK] = FrequencyShift;
                         break;
 
                     case DOWNEVENT : 
                         FrequencyShift = (FrequencyShift > MINSHIFT) ? FrequencyShift-1 : MINSHIFT;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = FrequencyShift;
+                        menuValues[menuLoopState & STATEMASK] = FrequencyShift;
                         break;
                 }
                 // }}}
@@ -1532,17 +1723,15 @@ void mainLoop(void)
                 switch (inputStateSelector)
                 {
                     case SELECTEVENT :
-                        menuLoopState -= MMUTELEVELVAR;
-                        menuValues[menuLoopState] = FrequencyShift;
+                        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
+                        menuValues[menuLoopState & STATEMASK] = FrequencyShift;
                         inputStateSelector= IDLE;
+                        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
                 menuValues[menuLoopState] = FrequencyShift;
                 // }}}
-                if (menuLoopState<MMUTELEVELVAR) 
-                    showMenuItem();
-                else
-                    showMenuItemValue();
+                showItem();
                 break;
 
                 // }}}
@@ -1558,7 +1747,7 @@ void mainLoop(void)
                         if (CtcssTones[ctcssIndex] == -1) 
                             ctcssIndex--;
                         CTCSSfrequency = CtcssTones[ctcssIndex]; 
-                        menuValues[menuLoopState-MMUTELEVELVAR] = CTCSSfrequency;
+                        menuValues[menuLoopState & STATEMASK] = CTCSSfrequency;
                         break;
 
                     case DOWNEVENT : 
@@ -1567,7 +1756,7 @@ void mainLoop(void)
                         if (ctcssIndex == -1)
                             ctcssIndex=0;
                         CTCSSfrequency = CtcssTones[ctcssIndex]; 
-                        menuValues[menuLoopState-MMUTELEVELVAR] = CTCSSfrequency;
+                        menuValues[menuLoopState & STATEMASK] = CTCSSfrequency;
                         break;
                 }
                 // }}}
@@ -1576,16 +1765,14 @@ void mainLoop(void)
                 switch (inputStateSelector)
                 {
                     case SELECTEVENT :
-                        menuLoopState -= MMUTELEVELVAR;
+                        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
                         //menuValues[menuLoopState] = CTCSSfrequency;
                         inputStateSelector= IDLE;
+                        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
                 // }}}
-                if (menuLoopState<MMUTELEVELVAR) 
-                    showMenuItem();
-                else
-                    showMenuItemValue();
+                showItem();
                 setCTCSSfreq();
                 break;
 
@@ -1600,14 +1787,14 @@ void mainLoop(void)
                         ScanStartFrequency += (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
                         if (ScanStartFrequency > ScanEndFrequency) ScanStartFrequency = ScanEndFrequency;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = ScanStartFrequency;
+                        menuValues[menuLoopState & STATEMASK] = ScanStartFrequency;
                         break;
 
                     case DOWNEVENT : 
                         ScanStartFrequency -= (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
                         if (ScanStartFrequency < BANDBOTTOM) ScanStartFrequency = BANDBOTTOM;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = ScanStartFrequency;
+                        menuValues[menuLoopState & STATEMASK] = ScanStartFrequency;
                         break;
                 }
                 // }}}
@@ -1617,18 +1804,16 @@ void mainLoop(void)
                 {
                     case SELECTEVENT :
                         // switch back to item selection
-                        menuLoopState -= MMUTELEVELVAR;
+                        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
 
-                        menuValues[menuLoopState] = ScanStartFrequency;
+                        menuValues[menuLoopState & STATEMASK] = ScanStartFrequency;
                         inputStateSelector= IDLE;
+                        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
 
                 // }}}
-                if (menuLoopState<MMUTELEVELVAR) 
-                    showMenuItem();
-                else
-                    showMenuItemValue();
+                showItem();
                 break;
 
                 // }}}
@@ -1642,14 +1827,14 @@ void mainLoop(void)
                         ScanEndFrequency += (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
                         if (ScanEndFrequency > BANDTOP) ScanEndFrequency = BANDTOP;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = ScanEndFrequency;
+                        menuValues[menuLoopState & STATEMASK] = ScanEndFrequency;
                         break;
 
                     case DOWNEVENT : 
                         ScanEndFrequency -= (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
                         if (ScanEndFrequency < ScanStartFrequency) ScanEndFrequency = ScanStartFrequency;
                         inputStateRotary = IDLE;
-                        menuValues[menuLoopState-MMUTELEVELVAR] = ScanEndFrequency;
+                        menuValues[menuLoopState & STATEMASK] = ScanEndFrequency;
                         break;
                 }
                 // }}}
@@ -1659,20 +1844,148 @@ void mainLoop(void)
                 {
                     case SELECTEVENT :
                         // switch back to item selection
-                        menuLoopState -= MMUTELEVELVAR;
+                        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
 
-                        menuValues[menuLoopState] = ScanEndFrequency;
+                        menuValues[menuLoopState & STATEMASK] = ScanEndFrequency;
+                        inputStateSelector= IDLE;
+                        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
+                        break;
+                }
+
+                // }}}
+                showItem();
+                break;
+
+                // }}}
+                // }}}
+                // {{{ submenu item selection
+                // {{{  case MARETURNMODE:
+
+            case MARETURNMODE:      // 400
+                switch (inputStateRotary)
+                {
+                    case UPEVENT :
+                        nextMenuItem();
+                        break;
+
+                    case DOWNEVENT : 
+                        prevMenuItem();
+                        break;
+                }
+
+                switch (inputStateSelector)
+                {
+                    case SELECTEVENT :
+                        // switch from item selection to value selection
+                        menuLoopState = (menuLoopState & STATEMASK) + SUBMENU1_VAL;
+                        inputStateSelector= IDLE;
+                        break;
+                }
+                showItem();
+                break;
+
+                // }}}
+                // {{{  case MAREFFREQ
+
+            case MAREFFREQ :
+                switch (inputStateRotary)
+                {
+                    case UPEVENT :
+                        nextMenuItem();
+                        break;
+
+                    case DOWNEVENT : 
+                        prevMenuItem();
+                        break;
+                }
+
+                switch (inputStateSelector)
+                {
+                    case SELECTEVENT :
+                        // switch from item selection to value selection
+                        menuLoopState = (menuLoopState & STATEMASK) + SUBMENU1_VAL;
+                        inputStateSelector= IDLE;
+                        break;
+                }
+                showItem();
+                break;
+
+                // }}}
+                // }}}
+                // {{{ submenu value selection
+                // {{{  case MARETURNMODEVAR
+
+            case MARETURNMODEVAR :
+                // {{{ up/down
+                switch (inputStateRotary)
+                {
+                    case UPEVENT :
+                    case DOWNEVENT : 
+                        DirectMenuReturn = (DirectMenuReturn) ? FALSE : TRUE;
+                        inputStateRotary = IDLE;
+                        subMenuValues[menuLoopState & STATEMASK] = DirectMenuReturn;
+                        break;
+                }
+                // }}}
+                // {{{ select
+
+                switch (inputStateSelector)
+                {
+                    case SELECTEVENT :
+                        // immediate switch back to mainmenu selection
+                        menuLoopState = MSETTINGS;
+
+                        subMenuValues[menuLoopState & STATEMASK] = DirectMenuReturn;
                         inputStateSelector= IDLE;
                         break;
                 }
 
                 // }}}
-                if (menuLoopState<MMUTELEVELVAR) 
-                    showMenuItem();
-                else
-                    showMenuItemValue();
+                showItem();
                 break;
 
+                // }}}
+                // {{{  case MAREFFREQVAR
+
+            case MAREFFREQVAR :
+                // {{{ up/down
+                switch (inputStateRotary)
+                {
+                    case UPEVENT :
+                        inputStateRotary = IDLE;
+                        refFreqIndex++;
+                        if (refFreqPLL[refFreqIndex] == -1) 
+                            refFreqIndex--;
+                        subMenuValues[menuLoopState & STATEMASK] = refFreqPLL[refFreqIndex];
+                        break;
+
+                    case DOWNEVENT : 
+                        inputStateRotary = IDLE;
+                        refFreqIndex--;
+                        if (refFreqIndex == -1) 
+                            refFreqIndex=0;
+                        subMenuValues[menuLoopState & STATEMASK] = refFreqPLL[refFreqIndex];
+                        break;
+                }
+                // }}}
+                // {{{ select
+
+                switch (inputStateSelector)
+                {
+                    case SELECTEVENT :
+                        // immediate switch back to mainmenu selection
+                        menuLoopState = MSETTINGS;
+
+                        subMenuValues[menuLoopState & STATEMASK] = DirectMenuReturn;
+                        inputStateSelector= IDLE;
+                        break;
+                }
+
+                // }}}
+                showItem();
+                break;
+
+                // }}}
                 // }}}
         }
         // {{{ scanner
@@ -1692,7 +2005,11 @@ void mainLoop(void)
         }   
         // }}}
 
-        if ((!Transmitting) && (menuLoopState == MOFF)) showSMeter();
+        if ((!Transmitting) && (menuLoopState == TUNING)) 
+            showSMeter();
+        if (menuLoopState == TUNING)
+            showTrx();
+
         setMuted(inputStateSMeter < MuteLevel);
         updateDisplay();
 
@@ -1702,27 +2019,38 @@ void mainLoop(void)
         if (TRUE)
         {
             deSetCursorPosition(DBGROW,1);
+            printf("\033[37m"); // light gray
             printf("========================= debug ========================\r\n");
             printf("CTCSSenable     =      %3s  | ",yesno(CTCSSenable));
-                printf("inputStateRotary= %8d\r\n",inputStateRotary);
+            printf("inputStateRotary= %8d\r\n",inputStateRotary);
+
             printf("CTCSSfrequency  = %8d  | ",CTCSSfrequency);
-                printf("menuLoopState   = %8d\r\n",menuLoopState);
+            printf("menuLoopState   =     %04X\r\n",menuLoopState);
+
             printf("MuteLevel       = %8d  | ",MuteLevel);
-                printf("sample          = %8d\r\n",S);
+            printf("menuLoopState S = %8d\r\n",menuLoopState & STATEMASK);
+
             printf("ShiftEnable     =      %3s  | ",yesno(ShiftEnable));
-                printf("\r\n");
+            printf("menuLoopState T =     %04X\r\n",menuLoopState & TYPEMASK);
+
             printf("LargeEnable     =      %3s  | ",yesno(LargeStepEnable));
-                printf("\r\n");
+            printf("sample          = %8d\r\n",S);
+
             printf("FrequencyShift  = %8d  |",FrequencyShift);
-                printf("\r\n");
+            printf("\r\n");
+
             printf("Transmitting    =      %3s  | ",yesno(Transmitting));
-                printf("\r\n");
+            printf("\r\n");
+
             printf("Scanning        =      %3s  | ",yesno(Scanning));
-                printf("\r\n");
+            printf("\r\n");
+
             printf("Scan Start      = %4d.%03d  | ", ScanStartFrequency/1000, ScanStartFrequency%1000);
-                printf("\r\n");
+            printf("\r\n");
+
             printf("Scan End        = %4d.%03d  | ", ScanEndFrequency/1000, ScanEndFrequency%1000);
-                printf("\r\n");
+            printf("\r\n");
+
             // printf("currentTime     = %8d\r\n",currentTime);
             // printf("prevStepTime    = %8d\r\n",prevStepTime);
             // printf("ctcssIndex      = %8d\r\n",ctcssIndex);
@@ -1733,6 +2061,7 @@ void mainLoop(void)
             // printf("|%-16s|\r\n", DisplayBuffer[0]);
             // printf("|%-16s|\r\n", DisplayBuffer[1]);
             // printf("=====================\r\n");
+            printf("\033[30m"); // black
         }
         else
         {
