@@ -26,7 +26,7 @@
 // {{{ includes
 
 // F_CPU used in util/delay.h
-#define F_CPU       1000000UL
+#define F_CPU       8000000UL
 
 #include <stdio.h>
 #include <string.h>
@@ -77,9 +77,11 @@
 #define TXEVENT             3
 #define RXEVENT             4
 #define SELECTEVENT         5
-#define SHIFTONEVENT        6
-#define SHIFTOFFEVENT       7
-#define LARGEEVENT          8
+#define SELECTBOUNCING      6
+#define SELECTWAITRELEASE   7
+#define SHIFTONEVENT        8
+#define SHIFTOFFEVENT       9
+#define LARGEEVENT          10
 // }}}
 
 // {{{ States
@@ -133,6 +135,8 @@
 #define MINCTCSS            10
 #define MAXCTCSS            90
 
+#define SELECTBOUNCEDELAY   1   // mainloop cycle time = 34 ms.
+
 #ifdef TESTING
 #define DE_WIDTH    16
 #define DE_HEIGHT    2
@@ -144,30 +148,40 @@
 // }}}
 // {{{ defines for ATMEGA328 
 #ifdef TESTING
-#define PB0 0
-#define PB1 1
-#define PB2 2
-#define PB3 3
-#define PB4 4
-#define PB5 5
-#define PB6 6
-#define PB7 7
 
-#define PC0 0
-#define PC1 1
-#define PC2 2
-#define PC3 3
-#define PC4 4
-#define PC5 5
-#define PC6 6
-#define PC7 7
+#define PB0 0       // (14) display - E
+#define PB1 1       // (15) display - RS
+#define PB2 2       // (16) not used
+#define PB3 3       // (17) CTCSS - tone
+#define PB4 4       // (18) display - D4
+#define PB5 5       // (19) display - D5
+#define PB6 6       // (9)  display - D6
+#define PB7 7       // (10) display - D7
 
-int tx;
-int freq;
-int shiftSwitch;
-int shift;
-char str[50];
-int ports[10];
+#define PC0 0       // (23) PLL - LE
+#define PC1 1       // (24) PLL - DATA
+#define PC2 2       // (25) PLL - CLK   
+#define PC3 3       // (26) TXON
+#define PC4 4       // (27) MUTE
+#define PC5 5       // (28) ADC5 Smeter-input
+#define PC6 6       // (1)  (uP /reset)
+#define PC7 7       // does not exist
+
+#define PD0 0       // (2)  input - /PTT
+#define PD1 1       // (3)  input - Shift
+#define PD2 2       // (4)  input - Push / Select
+#define PD3 3       // (5)  input - Rotary Encoder
+#define PD4 4       // (6)  input - Rotary Encoder
+#define PD5 5       // (11) not used
+#define PD6 6       // (12) not used
+#define PD7 7       // (13) not used
+
+//short tx;
+//long  freq;
+//short shiftSwitch;
+//short shift;
+//char str[50];
+short ports[10];
 #define PORTB ports[1]
 #define PORTC ports[2]
 
@@ -239,8 +253,8 @@ typedef unsigned char u08;
 // {{{ All of these should be removed
 
 unsigned char _BV(unsigned char c) { return c; }
-void _delay_us(int s) {} 
-void _delay_ms(int s) {} 
+void _delay_us(short s) {} 
+void _delay_ms(short s) {} 
 
 // }}}
 #endif
@@ -248,7 +262,7 @@ void _delay_ms(int s) {}
 
 void updateDisplay(void);
 void showTrx(void);
-void setFreq(long int f);
+void setFreq(long f);
 void initPLL(void);
 void initLCD(void);
 void initADC(void);
@@ -257,48 +271,49 @@ void lcdCmd(char c);
 void lcdData(char c);
 void lcdHome(void);
 void lcdNib(char);
-void setPLL(long int c);
+void setPLL(long c);
 void setMuted(void);
-void showFrequency(int r, int f);
+void showFrequency(short r, long f);
 void lcdStr(char *s);
 
 // }}}
 // {{{ Globals
 
 #ifdef TESTING
-int goingUp;                // tmp global
-int LoopCounter;            // tmp global
-int cpos;                   // display: lineair cursor position
+short goingUp;               // tmp global
+short LoopCounter;           // tmp global
+short cpos;                  // display: lineair cursor position
 #endif
-int currentTime;            // tmp global
-int prevStepTime;
-int goStep;
+short currentTime;           // tmp global
+short prevStepTime;
+short goStep;
 
-unsigned char GClkPrev;     // used for rotary dial handling
-unsigned char GQdPrev;      // used for rotary dial handling
-unsigned char GQd;          // used for rotary dial handling
+char GClkPrev;               // used for rotary dial handling
+char GQdPrev;                // used for rotary dial handling
+char GQd;                    // used for rotary dial handling
 
-unsigned char DisplayDirty; // indicates the display buffer has been updated
+char DisplayDirty;           // indicates the display buffer has been updated
 
-int  LowPass;               // Variable for S-meter lowpass filter
-char Transmitting;          // boolean: TX = true, RX = false;
-char Scanning;              // boolean: scanning = true;
-char Muted;                 // boolean: TRUE=audio muted, FALSE=audio on 
-char ShiftEnable;           // boolean: shifted = true;
-char ReverseShift;          // boolean: swap transmit and receive frequencies
-char LargeStepEnable;       // boolean: channel steps are 10x as big
-int  FrequencyShift;        // size of frequency shift
-int  MuteLevel;             // level below which audio muting is enabled
-char CTCSSenable;           // boolean: CTCSS tone enabled during transmit
-int  CTCSSfrequency;        // frequency of CTCSS tone to use
-long DialFrequency;         // frequency as set by dial
-long CurrentFrequency;      // frequency setting sent to synthesizer
-long ScanStartFrequency;    // duh...
-long ScanEndFrequency;      // duh...
-long PllReferenceFrequency; // duh...
-char DirectMenuReturn;      // When true: exit the menu upon a value selection.
-char Line[DISPLAY_WIDTH+10];
-char DisplayBuffer[LINECOUNT][DISPLAY_WIDTH+5];
+short LowPass;               // Variable for S-meter lowpass filter
+char  Transmitting;          // boolean: TX = true, RX = false;
+char  Scanning;              // boolean: scanning = true;
+char  Muted;                 // boolean: TRUE=audio muted, FALSE=audio on 
+char  ShiftEnable;           // boolean: shifted = true;
+char  ReverseShift;          // boolean: swap transmit and receive frequencies
+char  LargeStepEnable;       // boolean: channel steps are 10x as big
+short FrequencyShift;        // size of frequency shift
+short MuteLevel;             // level below which audio muting is enabled
+short inputSelectDebounce;   // counter for bounce delay period
+char  CTCSSenable;           // boolean: CTCSS tone enabled during transmit
+short CTCSSfrequency;        // frequency of CTCSS tone to use
+long  DialFrequency;         // frequency as set by dial
+long  CurrentFrequency;      // frequency setting sent to synthesizer
+long  ScanStartFrequency;    // duh...
+long  ScanEndFrequency;      // duh...
+long  PllReferenceFrequency; // duh...
+char  DirectMenuReturn;      // When true: exit the menu upon a value selection.
+char  Line[DISPLAY_WIDTH+10];
+char  DisplayBuffer[LINECOUNT][DISPLAY_WIDTH+5];
 
 // Menu
 // 
@@ -318,8 +333,8 @@ long  menuValues [] =  {
     INITIAL_MUTELEVEL,  // 0
     INITIAL_SHIFT,      // 1
     INITIAL_CTCSS,      // 2
-    1280000L,            // 3
-    1290000L,            // 4
+    1280000L,           // 3
+    1290000L,           // 4
     0,                  // 5
     0,                  // 6
     0};                 // 7
@@ -336,7 +351,7 @@ long subMenuValues1 [] = {
     INITIAL_REFERENCE   // 1
 };
 
-int menuLoopState;
+short menuLoopState;
 
 // define S-meter chars
 unsigned char smeter[3][8] = {
@@ -346,19 +361,19 @@ unsigned char smeter[3][8] = {
 };
 
 //CTCSS frequencies
-int CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
+short CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
     1000,1035,1072,1109,1148,1188,1230,1273,1318,1365,1413,1462,1514,1567,1598,
     1622,1655,1679,1713,1738,1773,1799,1835,1862,1899,1928,1966,1995,2035,2065,
     2107,2181,2257,2291,2336,2418,2503,2541, -1};
-int ctcssIndex;
+short ctcssIndex;
 
-int refFreqPLL[] = { 13000, 12000, 10700, -1 };
-int refFreqIndex;
+short refFreqPLL[] = { 13000, 12000, 10700, -1 };
+short refFreqIndex;
 
 #ifdef TESTING
-int  theMainEvent;
-char GetcBuffer;
-int  GetcAvail;
+short  theMainEvent;
+char   GetcBuffer;
+short  GetcAvail;
 struct termios orig_termios;
 #ifdef DBG_LOGGING
 FILE *dbg;
@@ -367,9 +382,8 @@ FILE *dbg;
 
 // input states controls
 #ifdef TESTING
-char vInRotState;
-char vInputStateRotary;
-int S;
+char vInRotState=9;
+//short S;
 #endif
 char inputStateRotary;
 char inputStateSelector;
@@ -400,7 +414,7 @@ void initLCD(void)
     // ... and force to state 1
     lcdNib(0x30);
     _delay_ms(10);
-   
+
     // 4 bits mode, 2 lines
     lcdCmd(dispFUNC); // 0x20
     _delay_ms(10);
@@ -425,23 +439,23 @@ void initLCD(void)
     lcdCmd(dispCLEAR); // 0x01
     _delay_ms(20);
 
-/*
+    /*
     // define custom chars
-    int i,j;
+    short i,j;
     lcdCmd(dispCGRA);
     for (i=0; i<3; i++) 
     {
-        for (j=0; j<8; j++) 
-        {
-            lcdData(smeter[i][j]);
-        }
+    for (j=0; j<8; j++) 
+    {
+    lcdData(smeter[i][j]);
     }
-*/
+    }
+     */
 
     // welcome message 
     lcdHome();
     _delay_ms(20);
-    
+
     //              0123456789ABCDEF
     char hello[] = "PA3BJI sw v0.5 ";
     lcdStr(hello);
@@ -460,7 +474,7 @@ void initADC(void)
 
 void initPLL(void)
 {
-    long int reg;
+    long reg;
     PllReferenceFrequency = 13000UL;
 
     cbi(PORTC, DATA);
@@ -569,9 +583,9 @@ void initialize(void)
 
 // {{{ ttyControl
 
-// {{{ void ttySetCursorPosition(int row, int col)
+// {{{ void ttySetCursorPosition(short row, short col)
 
-void ttySetCursorPosition(int row, int col)
+void ttySetCursorPosition(short row, short col)
 {
     printf("\033[%d;%df",row+1, col+1);
 }
@@ -592,9 +606,9 @@ void ttyClearScreen(void)
 // {{{ Display emulator
 // {{{ deSetCursorPosition
 
-void deSetCursorPosition(int row, int col)
+void deSetCursorPosition(short row, short col)
 {
-    cpos = row*16  + col;
+    cpos = row*DISPLAY_WIDTH + col;
     ttySetCursorPosition(row+YTop, col+XTop);
 }
 
@@ -613,7 +627,7 @@ void deData(char c)
 {
     printf("%c",c);
     cpos++; 
-    if (cpos==16)
+    if (cpos==DISPLAY_WIDTH)
         deSetCursorPosition(2,1);
 }
 
@@ -622,19 +636,19 @@ void deData(char c)
 
 void deClearScreen(void)
 {
-    int i;
+    short i;
     deTop();
-    for (i=0; i<16; i++)
+    for (i=0; i<DISPLAY_WIDTH; i++)
     {
         deData(' ');
     }
     deSetCursorPosition(1,0); 
-    for (i=0; i<16; i++)
+    for (i=0; i<DISPLAY_WIDTH; i++)
     {
         deData(' ');
     }
-    
-    for (i=0; i<16; i++)
+
+    for (i=0; i<DISPLAY_WIDTH; i++)
     {
         DisplayBuffer[0][i]=' ';
         DisplayBuffer[1][i]=' ';
@@ -646,7 +660,7 @@ void deClearScreen(void)
 
 void deCmd(char c)
 {
-    int pos;
+    short pos;
 
     if (c == dispCLEAR)
     {
@@ -661,16 +675,16 @@ void deCmd(char c)
     if ((c & 0x80) == dispDDRA)
     {
         pos = c & 0x7F;
-        deSetCursorPosition((pos/16)+1 , (pos%16)+1);
+        deSetCursorPosition((pos/DISPLAY_WIDTH)+1 , (pos%DISPLAY_WIDTH)+1);
     }
 }
 
 // }}}
 // {{{ deFrame()
 
-void deLine(int w)
+void deLine(short w)
 {
-    int i;
+    short i;
     printf("+");
     for (i=1; i<w; i++)
         printf("-");
@@ -679,7 +693,7 @@ void deLine(int w)
 
 void deFrame(void)
 {
-    int y;
+    short y;
 
     // cursor off
     printf("\033[?25l");   
@@ -701,9 +715,9 @@ void deFrame(void)
 
 // }}}
 
-// {{{ char* yesno(int boolean)
+// {{{ char* yesno(short boolean)
 
-char* yesno(int boolean)
+char* yesno(short boolean)
 {
     // green -> light gray
     static char yes[]="\033[32myes\033[37m";
@@ -736,7 +750,7 @@ void set_conio_terminal_mode()
     tcsetattr(0, TCSANOW, &new_termios);
 }
 
-int FHEkbhit()
+short FHEkbhit()
 {
     struct timeval tv = { 0L, 0L };
     fd_set fds;
@@ -745,10 +759,10 @@ int FHEkbhit()
     return select(1, &fds, NULL, NULL, &tv);
 }
 
-int FHEgetchar()
+short FHEgetchar()
 {
-    int r;
-    unsigned char c;
+    short r;
+    char c;
     if ((r = read(0, &c, sizeof(c))) < 0) {
         return r;
     } else {
@@ -793,16 +807,16 @@ void FHEungetc(char c)
 // {{{ input functions
 
 #ifdef TESTING
-// {{{ int bounce()
+// {{{ short bounce()
 
 #define bounceCLK   1
 #define bounceDATA  2
 
-int bounce(int clock, int data, int bounceSelect, int newState)
+short bounce(short clock, short data, short bounceSelect, short newState)
 {
-    int rv; // return value
+    short rv; // return value
 
-    static int bounceCount;
+    static short bounceCount;
 
     // bounce during the first 4 cycles
     // keep stable in the last 4 cycles
@@ -845,10 +859,10 @@ int bounce(int clock, int data, int bounceSelect, int newState)
 
 void getInputRotary(void)
 {
-    unsigned char clk;
-    unsigned char data;
-    unsigned char sample;
-    unsigned char UpDown=0;
+    char clk;
+    char data;
+    char sample;
+    char UpDown=0;
 
 #ifdef TESTING
     // =========================
@@ -1002,6 +1016,14 @@ void getInputRotary(void)
 
     GClkPrev = clk;
     GQdPrev  = GQd;
+
+// $$$ FHE DEBUG
+    if (GQd) 
+        sbi(PORTB,PB2);
+    else
+        cbi(PORTB,PB2);
+// $$$ FHE /DEBUG
+
 }
 
 
@@ -1010,9 +1032,9 @@ void getInputRotary(void)
 
 void getInputSelector(void)
 {
-    unsigned char c;
 #ifdef TESTING
-
+    // {{{ testing
+    char c;
     if ((c = FHEgetc()))
     {
         switch (c)
@@ -1026,8 +1048,11 @@ void getInputSelector(void)
                 FHEungetc(c);
         }
     }
+    // }}}
 #else
 
+#if FALSE
+    // {{{ obsolete example
     // rotary button pushed?
     if (!(PIND & (1<<ROTKEY))) 
     {
@@ -1046,7 +1071,56 @@ void getInputSelector(void)
         else
             inputStateSelector = SELECTEVENT;
     }
+    // }}}
+#endif
 
+    // {{{ new selector code
+    if (!(PIND & (1<<ROTKEY))) 
+    {
+        // run this if selector is pressed    
+        switch (inputStateSelector)
+        {   
+            // this is a new push event
+            case IDLE : 
+                // signal selector pushed to the proces state machine
+                inputStateSelector  = SELECTEVENT;
+                // setup the bounce delay
+                inputSelectDebounce = SELECTBOUNCEDELAY;
+                break;
+
+                // after the first push, we may bounce for some amount of cycles
+            case SELECTEVENT : 
+                inputStateSelector  = SELECTBOUNCING;
+                break; 
+
+                // decrease bounce delay unil bounce time passed
+            case SELECTBOUNCING : 
+                inputSelectDebounce--;
+                inputStateSelector  = (inputSelectDebounce==0) ? SELECTWAITRELEASE : SELECTBOUNCING; 
+                break; 
+
+                // now we need to wait until the select button has been relased again.
+                // the next "else" statement will bring us to the IDLE state
+            case SELECTWAITRELEASE : 
+                break;
+
+                // any other state on selector pushed is illegal, 
+                // so return to idle state
+            default :
+                inputStateSelector = IDLE;
+
+        }
+    }  else 
+        // arrive here when selector not pressed (anymore)
+    {
+        // if we are waiting for release
+        if (inputStateSelector == SELECTWAITRELEASE)
+        {
+            // then set state to idle
+            inputStateSelector = IDLE; 
+        }
+    }
+    // }}}
 #endif
 }
 
@@ -1076,7 +1150,7 @@ void getInputTxRx(void)
     }
 #else
 
-    unsigned char sw;
+    char sw;
     sw = PIND;
     if (Transmitting && (sw & (1<<PTT)))
         inputStatePTT = RXEVENT;
@@ -1112,7 +1186,7 @@ void getInputShift(void)
         }
     }
 #else
-    unsigned char sw;
+    char sw;
     sw = PIND;
 
     // switch shift off
@@ -1144,7 +1218,7 @@ void getInputSMeter(void)
             inputStateSMeter--;
     }
 #else
-    register int s;
+    register short s;
 
     ADCSRA |= (1<<ADSC)|(1<<ADEN); 
     while ((ADCSRA & (1<<ADSC))!=0);
@@ -1192,9 +1266,17 @@ void getInputLargeStep(void)
 
 // {{{ void lcdNib(char c)
 
-void lcdNib(char c)
+void lcdNib(char nibble)
 {
-    PORTB = c;
+#if FALSE // for debugging
+    unsigned char bcpy;
+    bcpy = PORTB & 0x0C;    // clear high nibble
+    nibble = nibble & 0xF3; // clear low nibble
+    nibble = nibble + bcpy; // combine log nibble of PORTB with high nibble of NIBBLE
+    // nibble now containts the content of nibble + the original 4 low bits of PORTB
+#endif
+
+    PORTB = nibble;
     sbi(PORTB, LCD_E);
     _delay_us(2);
     cbi(PORTB, LCD_E);
@@ -1258,7 +1340,7 @@ void lcdStr(char *s)
 
 void lcdStr16(char *s)
 {
-    int i=16;
+    short i=DISPLAY_WIDTH;
     while (i--)
         lcdData(*s++);
 }
@@ -1305,11 +1387,11 @@ void outputTrxBit(void)
 
 // }}}
 
-// {{{ void setDisplay(int row, char *string)
+// {{{ void setDisplay(short row, char *string)
 
-void setDisplay(int row, char *string)
+void setDisplay(short row, char *string)
 {
-    strcpy(DisplayBuffer[row], string);
+    strncpy(DisplayBuffer[row], string, DISPLAY_WIDTH);
     DisplayDirty = TRUE;
 }
 
@@ -1367,11 +1449,11 @@ void setMuted()
 
 // }}}
 
-// {{{ void showFrequency(int row, int freq)
+// {{{ void showFrequency(short row, long freq)
 
-void showFrequency(int row, int fr)
+void showFrequency(short row, long fr)
 {
-    sprintf(Line, "VFO %4u.%03u MHz", fr/1000, fr%1000);
+    sprintf(Line, "VFO %4lu.%03lu MHz", fr/1000, fr%1000);
     setDisplay(row,Line);
 }
 
@@ -1401,7 +1483,8 @@ void showTrx(void)
 void showSMeter(void)
 {
 #ifdef TESTING
-    int i;
+    short i;
+    if (inputStateSMeter > 32) inputStateSMeter=32;
     for (i=0; i<inputStateSMeter/2; i++)
         DisplayBuffer[1][i]='"';
     DisplayBuffer[1][inputStateSMeter/2] = ((inputStateSMeter%2)==0) ? '\'' : '"';
@@ -1409,7 +1492,7 @@ void showSMeter(void)
 #else
 #if FALSE
     short n = 15;
-    int level = inputStateSMeter;
+    short level = inputStateSMeter;
 
     //lcdCmd(0xc0);
     lcdCmd(dispDDRA + 0x40);
@@ -1456,11 +1539,11 @@ void clearSMeter(void)
 
 // }}}
 
-// {{{ void bottomLinePrinter(int index, char *prompt)
+// {{{ void bottomLinePrinter(short index, char *prompt)
 
-void bottomLinePrinter(int index, char *prompt)
+void bottomLinePrinter(short index, char *prompt)
 {
-    int val;
+    long val;
 
     if (((index & TYPEMASK) == MAINMENU) || ((index & TYPEMASK) == MAINMENU_VAL))
         val = menuValues[index & STATEMASK];
@@ -1474,7 +1557,13 @@ void bottomLinePrinter(int index, char *prompt)
         case MSSTARTVAR :
         case MSEND :
         case MSENDVAR :
-            sprintf(Line, "%s%4u.%03u MHz", prompt, val/1000, val%1000);
+#ifdef DBG_LOGGING
+            fprintf(dbg,"point a\n");
+#endif
+            sprintf(Line, "%s%04ld.%03ld MHz", prompt, val/1000, val%1000);
+#ifdef DBG_LOGGING
+            fprintf(dbg,"point b\n");
+#endif
             break;
 
         case MCTCSS :
@@ -1496,11 +1585,11 @@ void bottomLinePrinter(int index, char *prompt)
 
         case MAREFFREQ :
         case MAREFFREQVAR :
-            sprintf(Line, "%s%2d.%03d MHz%*s", prompt, val/1000, val%1000, DISPLAY_WIDTH-14, " ");
+            sprintf(Line, "%s%2ld.%03ld MHz%*s", prompt, val/1000, val%1000, DISPLAY_WIDTH-14, " ");
             break;
 
         default : 
-            sprintf(Line, "%s%-*d", prompt, DISPLAY_WIDTH-2, val);
+            sprintf(Line, "%s%-*ld", prompt, DISPLAY_WIDTH-2, val);
     }
     setDisplay(1, Line);
 }
@@ -1516,16 +1605,34 @@ void showMenuItem()
         case MBACK :
         case MSCAN :
         case MSETTINGS :
+#ifdef DBG_LOGGING
+            fprintf(dbg,"point 1\n");
+#endif
             sprintf(Line,"> %-*s",DISPLAY_WIDTH-2, menuStrings[menuLoopState & STATEMASK]);
+#ifdef DBG_LOGGING
+            fprintf(dbg,"point 2\n");
+#endif
             break;
 
         default : 
+#ifdef DBG_LOGGING
+            fprintf(dbg,"point 3\n");
+#endif
             sprintf(Line,"> Set %-*s",DISPLAY_WIDTH-6, menuStrings[menuLoopState & STATEMASK]);
+#ifdef DBG_LOGGING
+            fprintf(dbg,"point 4\n");
+#endif
     }
     setDisplay(0, Line);
 
     // bottom line
+#ifdef DBG_LOGGING
+    fprintf(dbg,"point 5\n");
+#endif
     bottomLinePrinter(menuLoopState,"  "); 
+#ifdef DBG_LOGGING
+    fprintf(dbg,"point 6\n");
+#endif
 }
 
 // }}}
@@ -1577,11 +1684,11 @@ void showSubmenu1ItemValue()
 
 // {{{ PLL
 
-// {{{ void setPLL(long int r)
+// {{{ void setPLL(long r)
 
-void setPLL(long int r)
+void setPLL(long r)
 {
-    int i;
+    short i;
 
     for (i=0; i<24; i++) {
         if (r & 0x800000)
@@ -1601,11 +1708,11 @@ void setPLL(long int r)
 }
 
 // }}}
-// {{{ void setFreq(long int f)
+// {{{ void setFreq(long f)
 
-void setFreq(long int f)
+void setFreq(long f)
 {
-    long int reg, frast, A, B;
+    long reg, frast, A, B;
 
     f = (Transmitting) ? f : f-IF;
     frast = f/CHANNELSTEP;
@@ -1645,11 +1752,11 @@ void showItem(void)
 }
 
 // }}}
-// {{{ int getMaxMenuIndex(void)
+// {{{ short getMaxMenuIndex(void)
 
-int getMaxMenuIndex(void)
+short getMaxMenuIndex(void)
 {
-    int max;
+    short max;
     switch (menuLoopState & TYPEMASK)
     {
         case MAINMENU : 
@@ -1664,6 +1771,7 @@ int getMaxMenuIndex(void)
         case SUBMENU1_VAL : 
             max = SUBMENU1_VAL_END;
             break;
+
             // this value should never occur
         default :
             max = 666;
@@ -1676,7 +1784,7 @@ int getMaxMenuIndex(void)
 
 void nextMenuItem(void)
 {
-    int max = getMaxMenuIndex();  
+    short max = getMaxMenuIndex();  
 
     menuLoopState++;
     if ((menuLoopState & STATEMASK) > (max & STATEMASK))
@@ -1689,7 +1797,7 @@ void nextMenuItem(void)
 
 void prevMenuItem(void)
 {
-    int max = getMaxMenuIndex();
+    short max = getMaxMenuIndex();
 
     menuLoopState--;
     // STATEMASK is -1 in 6bit signed mode 
@@ -1703,7 +1811,7 @@ void prevMenuItem(void)
 
 void mainLoop(void)
 {
-    int busy = TRUE;
+    char busy = TRUE;
     while (busy)
     {
         // {{{ handle inputs
@@ -1722,13 +1830,16 @@ void mainLoop(void)
 
         char c;
         if ((c = FHEgetc()))
-            busy = (c != 'q');
+            busy = !((c == 'q') || (c == 27)); // not 'q' and not escape
 
         // swallow unused input characters
         (void)FHEgetc();
 #endif
         // }}}
         // {{{ output and processing state machine
+
+        // DEBUG $$$ FHE start of output state machine
+        sbi(PORTB,PB3);
 
         // the state machine does all the processing
         switch (menuLoopState)
@@ -1826,7 +1937,7 @@ void mainLoop(void)
                         menuLoopState = MAINMENU;
                         // stop scanning when entering the menu
                         Scanning = FALSE;
-                        inputStateSelector = IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         break;
                 }
                 break;
@@ -1858,7 +1969,7 @@ void mainLoop(void)
                     case SELECTEVENT :
                         // switch from item selection to value selection
                         menuLoopState = (menuLoopState & STATEMASK) + MAINMENU_VAL;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         break;
                 }
                 switch (menuLoopState & TYPEMASK)
@@ -1891,7 +2002,7 @@ void mainLoop(void)
                     case SELECTEVENT :
                         menuLoopState = TUNING;
                         Scanning = !Scanning;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         showFrequency(0, CurrentFrequency);
                         break;
                 }
@@ -1918,7 +2029,7 @@ void mainLoop(void)
                 {
                     case SELECTEVENT :
                         menuLoopState = MARETURNMODE;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         showFrequency(0, CurrentFrequency);
                         break;
                 }
@@ -1944,7 +2055,7 @@ void mainLoop(void)
                 {
                     case SELECTEVENT :
                         menuLoopState = TUNING;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         showFrequency(0, CurrentFrequency);
                         break;
                 }
@@ -1977,7 +2088,7 @@ void mainLoop(void)
                 {
                     case SELECTEVENT :
                         menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
-                        inputStateSelector = IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
@@ -2013,7 +2124,7 @@ void mainLoop(void)
                     case SELECTEVENT :
                         menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
                         menuValues[menuLoopState & STATEMASK] = FrequencyShift;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
@@ -2055,7 +2166,7 @@ void mainLoop(void)
                     case SELECTEVENT :
                         menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
                         menuValues[menuLoopState & STATEMASK] = CTCSSfrequency;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
@@ -2095,7 +2206,7 @@ void mainLoop(void)
                         menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
 
                         menuValues[menuLoopState & STATEMASK] = ScanStartFrequency;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
@@ -2135,7 +2246,7 @@ void mainLoop(void)
                         menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
 
                         menuValues[menuLoopState & STATEMASK] = ScanEndFrequency;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
                         break;
                 }
@@ -2166,7 +2277,7 @@ void mainLoop(void)
                     case SELECTEVENT :
                         // switch from item selection to value selection
                         menuLoopState = (menuLoopState & STATEMASK) + SUBMENU1_VAL;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         break;
                 }
                 showItem();
@@ -2192,7 +2303,7 @@ void mainLoop(void)
                     case SELECTEVENT :
                         // switch from item selection to value selection
                         menuLoopState = (menuLoopState & STATEMASK) + SUBMENU1_VAL;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         break;
                 }
                 showItem();
@@ -2223,7 +2334,7 @@ void mainLoop(void)
                         // immediate switch back to mainmenu selection
                         menuLoopState = MSETTINGS;
                         subMenuValues1[menuLoopState & STATEMASK] = DirectMenuReturn;
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         break;
                 }
 
@@ -2263,7 +2374,7 @@ void mainLoop(void)
                         // immediate switch back to mainmenu selection
                         menuLoopState = MSETTINGS;
                         subMenuValues1[menuLoopState & STATEMASK] = refFreqPLL[refFreqIndex];
-                        inputStateSelector= IDLE;
+                        inputStateSelector = SELECTBOUNCING;
                         break;
                 }
 
@@ -2278,7 +2389,7 @@ void mainLoop(void)
 #ifdef TESTING
         if (Scanning)
         {   
-            int StepDelay=125;
+            short StepDelay=125;
             clock_t now = clock();
             currentTime = (float)now * 1000.0F / CLOCKS_PER_SEC;
             goStep = (currentTime - prevStepTime) > StepDelay;
@@ -2309,6 +2420,13 @@ void mainLoop(void)
         updateDisplay();
 
         // }}}
+
+
+        // DEBUG $$$ FHE end of output state machine
+        cbi(PORTB,PB3);
+        // pulse width is output processing time
+        // frequency is system main-loop time 
+
         // {{{ testing and debugging
 #ifdef TESTING
 
@@ -2330,7 +2448,7 @@ void mainLoop(void)
             printf("menuLoopState T =     %04X\r\n",menuLoopState & TYPEMASK);
 
             printf("LargeEnable     =      %3s  | ",yesno(LargeStepEnable));
-            printf("sample          = %8d\r\n",S);
+            printf("\r\n");
 
             printf("FrequencyShift  = %8d  |",FrequencyShift);
             printf("\r\n");
@@ -2341,10 +2459,10 @@ void mainLoop(void)
             printf("Scanning        =      %3s  | ",yesno(Scanning));
             printf("\r\n");
 
-            printf("Scan Start      = %4d.%03d  | ", (int)ScanStartFrequency/1000, (int)ScanStartFrequency%1000);
+            printf("Scan Start      = %4lu.%03lu  | ", ScanStartFrequency/1000, ScanStartFrequency%1000);
             printf("\r\n");
 
-            printf("Scan End        = %4d.%03d  | ", (int)ScanEndFrequency/1000, (int)ScanEndFrequency%1000);
+            printf("Scan End        = %4lu.%03lu  | ", ScanEndFrequency/1000, ScanEndFrequency%1000);
             printf("\r\n");
 
             // printf("currentTime     = %8d\r\n",currentTime);
@@ -2354,9 +2472,9 @@ void mainLoop(void)
             // printf("unget charbuf   = %8X\r\n",GetcBuffer);
             // printf("unget charvail  = %8s\r\n",yesno(GetcAvail));
             printf("========================================================\r\n");
-            printf("|%-16s|\r\n", DisplayBuffer[0]);
-            printf("|%-16s|\r\n", DisplayBuffer[1]);
-            printf("=====================\r\n");
+            // printf("|%-*s|\r\n", DISPLAY_WIDTH, DisplayBuffer[0]);
+            // printf("|%-*s|\r\n", DISPLAY_WIDTH, DisplayBuffer[1]);
+            // printf("=====================\r\n");
             printf("\033[30m"); // black
         }
         else
@@ -2407,7 +2525,7 @@ int main(int argc, char *argv[])
 #endif
     // cursor back on
     printf("\033[?25h");   
-    // int i;
+    // short i;
     // for (i=0x20; i<255; i++) printf("%X-%c ", i,i);
 #endif
 
