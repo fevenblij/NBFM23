@@ -22,17 +22,32 @@
 // 
 // }}}
 // #define TESTING "this is the simulation. #UNDEF for the real thing" 
+// #define  DBG_LOGGING "used during testing to log debug info"
 // {{{ includes
 
+// F_CPU used in util/delay.h
+#define F_CPU       1000000UL
+
 #include <stdio.h>
+#include <string.h>
 
 #ifdef TESTING
+
 #include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/select.h>
 #include <termios.h>
+
+#else
+
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/eeprom.h>
+#include <avr/interrupt.h>
+#include <avr/eeprom.h>
+
 #endif
 
 // }}}
@@ -55,9 +70,6 @@
 #define DISPLAY_WIDTH       16
 #define LINECOUNT           2
 
-#define CLKMASK             1
-#define DATAMASK            2
-
 // {{{ input events
 #define IDLE                -10
 #define UPEVENT             1
@@ -65,8 +77,9 @@
 #define TXEVENT             3
 #define RXEVENT             4
 #define SELECTEVENT         5
-#define SHIFTEVENT          6
-#define LARGEEVENT          7
+#define SHIFTONEVENT        6
+#define SHIFTOFFEVENT       7
+#define LARGEEVENT          8
 // }}}
 
 // {{{ States
@@ -160,7 +173,6 @@ int ports[10];
 
 #endif
 
-#define F_CPU       1000000UL
 
 typedef unsigned char u08;
 
@@ -186,12 +198,26 @@ typedef unsigned char u08;
 // CTCSS & tone
 #define Beep        PB3
 
+#ifdef TESTING
+#define PD0         0
+#define PD1         1
+#define PD2         2
+#define PD3         3
+#define PD4         4
+#endif
+
 // rotary & switches
 #define PTT         PD0
 #define SHIFTKEY    PD1
 #define ROTKEY      PD2
-#define ROTINT      PD3
-#define ROT         PD4
+
+#ifdef TESTING
+#define CLKMASK     0x08
+#define DATAMASK    0x10
+#else   
+#define CLKMASK     PD3
+#define DATAMASK    PD4
+#endif
 
 // LCD
 #define LCD_D7      PB7
@@ -215,13 +241,15 @@ typedef unsigned char u08;
 // read  data  : RS=1, RW=0 <8 bit data>
 // }}}
 
-unsigned char _BV(unsigned char c) { return c; }
+#ifdef TESTING
 // {{{ All of these should be removed
 
+unsigned char _BV(unsigned char c) { return c; }
 void _delay_us(int s) {} 
 void _delay_ms(int s) {} 
 
 // }}}
+#endif
 // {{{ Globals
 
 void showTrx(void);
@@ -244,11 +272,14 @@ int currentTime;            // tmp global
 int prevStepTime;
 int goStep;
 
+unsigned char GClkPrev;     // used for rotary dial handling
+unsigned char GQdPrev;      // used for rotary dial handling
+unsigned char GQd;          // used for rotary dial handling
+
+int LowPass;                // Variable for S-meter lowpass filter
 int Transmitting;           // boolean: TX = true, RX = false;
 int Scanning;               // boolean: scanning = true;
 int Muted;                  // boolean: TRUE=audio muted, FALSE=audio on 
-int DialFrequency;          // frequency as set by dial
-int CurrentFrequency;       // frequency setting sent to synthesizer
 int ShiftEnable;            // boolean: shifted = true;
 int ReverseShift;           // boolean: swap transmit and receive frequencies
 int LargeStepEnable;        // boolean: channel steps are 10x as big
@@ -256,8 +287,10 @@ int FrequencyShift;         // size of frequency shift
 int MuteLevel;              // level below which audio muting is enabled
 int CTCSSenable;            // boolean: CTCSS tone enabled during transmit
 int CTCSSfrequency;         // frequency of CTCSS tone to use
-int ScanStartFrequency;     // duh...
-int ScanEndFrequency;       // duh...
+long DialFrequency;         // frequency as set by dial
+long CurrentFrequency;      // frequency setting sent to synthesizer
+long ScanStartFrequency;    // duh...
+long ScanEndFrequency;      // duh...
 long PllReferenceFrequency; // duh...
 int  DirectMenuReturn;       // When true: exit the menu upon a value selection.
 char Line[DISPLAY_WIDTH+10];
@@ -277,12 +310,12 @@ char *menuStrings[] = {
     "Settings",         // 6
     "Back"};            // 7
 
-int  menuValues [] =  {  
+long  menuValues [] =  {  
     INITIAL_MUTELEVEL,  // 0
     INITIAL_SHIFT,      // 1
     INITIAL_CTCSS,      // 2
-    1280000,            // 3
-    1290000,            // 4
+    1280000L,            // 3
+    1290000L,            // 4
     0,                  // 5
     0,                  // 6
     0};                 // 7
@@ -294,7 +327,7 @@ char *subMenuStrings1[] = {
     "PLL Ref:"          // 1
 };
 
-int subMenuValues1 [] = {
+long subMenuValues1 [] = {
     TRUE,               // 0
     INITIAL_REFERENCE   // 1
 };
@@ -307,12 +340,6 @@ unsigned char smeter[3][8] = {
     {0b00000,0b00000,0b10100,0b10100,0b10100,0b10100,0b00000,0b00000},
     {0b00000,0b00000,0b10101,0b10101,0b10101,0b10101,0b00000,0b00000}
 };
-
-// rotary
-int GClkPrev;
-int GQdPrev;
-int input;
-// /rotary
 
 //CTCSS frequencies
 int CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
@@ -329,7 +356,9 @@ int theMainEvent;
 char GetcBuffer;
 int  GetcAvail;
 struct termios orig_termios;
-//FILE *dbg;
+#ifdef DBG_LOGGING
+FILE *dbg;
+#endif
 #endif
 
 // input states controls
@@ -440,7 +469,7 @@ void initIRQ(void)
     // Setup Timer 1
     TCCR1A = 0x00;				// Normal Mode 
     TCCR1B = 0x01;				// div/1 clock, 1/F_CPU clock
-    toneValue = 5*F_CPU/tone;	// *10/2
+    // $$$ FHE TODO toneValue = 5*F_CPU/tone;	// *10/2
 
     // Enable interrupts as needed 
     TIMSK1 |= _BV(TOIE1);  	// Timer 1 overflow interrupt 
@@ -498,7 +527,7 @@ void initialize(void)
     initIRQ();
 
 #ifdef TESTING
-    vInRotState = 3;
+    vInRotState = 9;
     GetcAvail = FALSE;
     GetcBuffer = 0;
 #endif
@@ -507,6 +536,7 @@ void initialize(void)
 // }}}
 
 // }}}
+#ifdef TESTING
 // {{{ Scaffolding
 
 void setCursorPosition(int x, int y);
@@ -592,14 +622,6 @@ void deInit(void)
 void clearScreen(void)
 {
     deClearScreen();
-}
-
-// }}}
-// {{{ void setCursorPosition(int row, int col)
-
-void setCursorPosition(int row, int col)
-{
-    deSetCursorPosition(row+YTop, col+XTop);
 }
 
 // }}}
@@ -700,67 +722,70 @@ void FHEungetc(char c)
 
 // }}}
 // }}}
-
+#endif
 // {{{ input functions
 
 #ifdef TESTING
 // {{{ int bounce()
+
+#define bounceCLK   1
+#define bounceDATA  2
+
 int bounce(int clock, int data, int bounceSelect, int newState)
 {
-    int rv;
+    int rv; // return value
 
     static int bounceCount;
 
     // bounce during the first 4 cycles
     // keep stable in the last 4 cycles
 
-    if (bounceSelect == 1)
+    if (bounceSelect == bounceCLK)
     {
-        // clock bounces
+        // clock bounces : on odd bounceCount values, return inverted clock value
         rv =  (bounceCount & 0x01) ?  clock | data : (clock ^ CLKMASK) | (data);
-        //                            unchanged    one's complenment   unchanged
-    } else
+        //                            unchanged    one's complement   unchanged
+    } else // bounceDATA
     {
-        // data bounces
+        // data bounces : on odd bounceCount values, return inverted data value
         rv =  (bounceCount & 0x01) ?  clock | data : (clock) | (data ^ DATAMASK);
-        //                            unchanged     unchanged   one's  complenment
+        //                            unchanged     unchanged   one's  complement
     }
 
-    if (bounceCount > 13)
+    // after 4 times stop bouncing and return the true values
+    //if (bounceCount > 4)
         rv = (clock | data);
 
-    rv = rv & 3; 
-    S = rv;
+    // rv = rv & 3; 
+    // S = rv;
 
     // rotate through 8 cycles
     bounceCount++;
-    if (bounceCount > 31) 
+    //if (bounceCount > 8) 
     {
         bounceCount=0;
         vInRotState = newState;
-        // after 15 cycles goto next state
     }
-    //    if (bounceCount == 0) fprintf(dbg,"\n");
-    //    fprintf(dbg,"%02X ",rv);    
-
+#ifdef DBG_LOGGING
+   fprintf(dbg,"%02x ",rv);
+#endif
     return rv;
 }
+
 // }}}
 #endif
 // {{{ void getInputRotary(void)
 
-
 void getInputRotary(void)
 {
-    int clk;
-    int data;
-    int sample;
-    int qd;
-    int UpDown;
+    unsigned char clk;
+    unsigned char data;
+    unsigned char sample;
+    unsigned char UpDown=0;
 
 #ifdef TESTING
     // =========================
-
+    static char input;
     char c;
     if ((c = FHEgetc()))
     {
@@ -779,47 +804,53 @@ void getInputRotary(void)
         }
     }
 
+#ifdef DBG_LOGGING
+    fprintf(dbg," vir-%02x, ch-%02x ",vInRotState, c);
+#endif
     switch (vInRotState)
     {
-        // up rotate
+        // up rotation
         case 0 :
-            input = bounce(CLKMASK, 0,        2, 1);
+            input = bounce(CLKMASK, 0,        bounceDATA, 1);
             break;
 
         case 1 :
-            input = bounce(0,       0,        1, 2);
+            input = bounce(0,       0,        bounceCLK , 2);
             break;
 
         case 2 :
-            input = bounce(0,       DATAMASK, 2, 3);
+            input = bounce(0,       DATAMASK, bounceDATA, 3);
             break;
 
         case 3 :
-            input = bounce(CLKMASK, DATAMASK, 1, 9);
+            input = bounce(CLKMASK, DATAMASK, bounceCLK , 9);
             break;
 
-            // down rotate
+            // down rotation
         case 4 :
-            input = bounce(CLKMASK, DATAMASK, 2, 5) ;
+            input = bounce(CLKMASK, DATAMASK, bounceDATA, 5) ;
             break;
 
         case 5 :
-            input = bounce(0,       DATAMASK, 1, 6);
+            input = bounce(0,       DATAMASK, bounceCLK , 6);
             break;
 
         case 6 :
-            input = bounce(0,       0,        2, 7);
+            input = bounce(0,       0,        bounceDATA, 7);
             break;
 
         case 7 :
-            input = bounce(CLKMASK, 0,        1, 9);
+            input = bounce(CLKMASK, 0,        bounceCLK , 9);
             break;
 
         case 9 :
             vInRotState = 9;
             break;
     }
-
+    
+#ifdef DBG_LOGGING
+    fprintf(dbg, "i-%02x ",input);
+#endif
     // 
     // -+   +---+   +---+
     //  +---+   +---+   +---   Data
@@ -831,39 +862,79 @@ void getInputRotary(void)
     //   0 1 2 3 4 5 6 7 8 9
     // =========================
 #endif
+//                        +----------------------> rising edge -> frequency step
+//                        |
+//         double         |           positive
+//      edge triggerd     |        edge triggered
+//        +-------+       |           +-------+
+// DATA---| D   Q |--(Qd)-+     DATA--| D   Q |--> UpDown
+// CLK-+--|>      |         +---------|>      |
+//     |  |    /Q |         |         |    /Q |
+//     |  +-------+         |         +-------+
+//     +--------------------+
+//
+// Given a 90 degrees out of phase DATA and CLOCK signal that both
+// have bounce during the level change, Qd will be a cleaned up clock signal.
+// Using this cleaned up CLOCK (Qd), a single frequency step per cycle can be guaranteed, 
+// regardless of bouncing contacts.
+// Using the rising edge of CLOCK to sample the DATA in its stable periods will 
+// provide a clean UpDown signal.
+// On the rising Qd edge, the UpDown signal differentiates between rotate up and rotate down
 
+#ifdef TESTING
     sample = input;
+#else
+    /* read the port D input values             */
+    sample = PIND;
+#endif
+
+    /* isolate clock and data signals           */
     clk = (sample & CLKMASK) == 0;
     data = (sample & DATAMASK) == 0;
 
-    /* double edge triggered flipflop creates   */
-    /* clean clock pulses (qd)                  */
+#ifdef DBG_LOGGING
+    fprintf(dbg,"c-%02x d-%02x ",clk,data);
+#endif
+    /* Double edge triggered D-flipflop creates */
+    /* clean clock pulses output on Qd          */
 
-    if (clk != GClkPrev)
+    /* Any clock change will do                 */
+    /* Qd will be used to guarantee single freq */
+    /* steps dispute bounce                     */
+    if (clk != GClkPrev) 
     {
-        qd = data;
+        /* sample the data signal               */
+        GQd = data;      
     }
 
-    /* positive edge triggered flipflop creates */
-    /* directional value  (UpDown)              */
+#ifdef DBG_LOGGING
+    fprintf(dbg,"qd-%02x ",GQd);
+#endif
 
-    if (clk & !GClkPrev)
-    {
+    /* Positive edge triggered D-flipflop       */ 
+    /* creates  a directional value  (UpDown)   */
+ 
+    /* Trigger only on rising edge (CLK)        */
+    if (clk && !GClkPrev) 
+    {                    
+    /* The data signal is stable at this moment */
         UpDown = data;
     }
 
-    /* qd clock pulse changes frequency         */
-    /* on rising flank                          */
-    if (qd & !GQdPrev)
-    {
-        if (UpDown)
-            inputStateRotary = UPEVENT;
-        else
-            inputStateRotary = DOWNEVENT;
+    /* Trigger only on clean clock (Qd) going   */
+    /* high.                                    */
+    if (GQd & !GQdPrev)  
+    {                    
+        inputStateRotary = (UpDown) ? UPEVENT : DOWNEVENT;
     }
 
+
+#ifdef DBG_LOGGING
+    fprintf(dbg,"ud-%02x isr-%02x ",UpDown, inputStateRotary);
+#endif
+
     GClkPrev = clk;
-    GQdPrev  = qd;
+    GQdPrev  = GQd;
 }
 
 
@@ -872,7 +943,8 @@ void getInputRotary(void)
 
 void getInputSelector(void)
 {
-    char c;
+    unsigned char c;
+#ifdef TESTING
 
     if ((c = FHEgetc()))
     {
@@ -887,6 +959,28 @@ void getInputSelector(void)
                 FHEungetc(c);
         }
     }
+#else
+    
+	// rotary button pushed?
+	if (!(PIND & (1<<ROTKEY))) 
+    {
+		for (c=0;;c++) 
+        {
+			_delay_ms(200);// $$$ FHE TODO bounce suppressor (get rid of this) 
+			// wait for button released
+			if ((PIND & (1<<ROTKEY))) 
+            {
+				_delay_ms(200);// $$$ FHE TODO delay loop (get rid of this)
+				break;
+			}
+		}
+		if (c>5)
+			inputStateSelector = LARGEEVENT;
+		else
+			inputStateSelector = SELECTEVENT;
+	}
+
+#endif
 }
 
 // }}}
@@ -894,6 +988,7 @@ void getInputSelector(void)
 
 void getInputTxRx(void)
 {
+#ifdef TESTING
     char c;
 
     if ((c = FHEgetc()))
@@ -912,6 +1007,17 @@ void getInputTxRx(void)
                 FHEungetc(c);
         }
     }
+#else
+
+    unsigned char sw;
+    sw = PIND;
+    if (Transmitting && (sw & (1<<PTT)))
+        inputStatePTT = RXEVENT;
+
+    if (!Transmitting && !(sw & (1<<PTT)))
+        inputStatePTT = TXEVENT;
+
+#endif
 }
 
 // }}}
@@ -919,20 +1025,38 @@ void getInputTxRx(void)
 
 void getInputShift(void)
 {
+#ifdef TESTING
     char c;
 
     if ((c = FHEgetc()))
     {
         switch (c)
         {
+            case 'a'  :
+                inputStateShift = SHIFTOFFEVENT;
+                break;
+
             case 's'  :
-                inputStateShift = SHIFTEVENT;
+                inputStateShift = SHIFTONEVENT;
                 break;
 
             default :
                 FHEungetc(c);
         }
     }
+#else
+    unsigned char sw;
+    sw = PIND;
+
+    // switch shift off
+    if (ShiftEnable && (sw & (1<<SHIFTKEY) )) 
+        inputStateShift = SHIFTOFFEVENT;
+
+    // switch shift on
+    if (!ShiftEnable && !(sw & (1<<SHIFTKEY) )) 
+        inputStateShift = SHIFTONEVENT;
+
+#endif
 }
 
 // }}}
@@ -962,9 +1086,9 @@ void getInputSMeter(void)
     s = (1024-ADC)-44;
 
     // low pass s-meter signal
-    s += lps;
+    s += LowPass;
     s >>= 1;
-    lps = s;
+    LowPass= s;
 
     inputStateSMeter = s;
 #endif
@@ -1054,76 +1178,17 @@ void lcdStr(char *s)
 
 // }}}
 
-// {{{ void hex2bcd(long int f)
-void hex2bcd(long int f)
-{
-    long int x = 10000000;
-    int i;
-    char d;
+// {{{ void setCursorPosition(int row, int col)
 
-    for (i=0; i<8; i++) {
-        d = 0;
-        while (TRUE) 
-        {
-            f -= x;
-            if (f < 0) break;
-            d++;
-        }
-        str[i] = d + 0x30;
-        f += x;
-        x = x/10;
-    }
+void setCursorPosition(int row, int col)
+{
+#ifdef TESTING
+    deSetCursorPosition(row+YTop, col+XTop);
+#else
+#endif
 }
 
-
 // }}}
-// {{{ void display(long int f)
-void display(long int f)
-{
-    int i;
-    char c;
-
-    hex2bcd(f);
-
-    lcdCmd(0x80 + 4);
-    _delay_us(200);
-
-    for (i=1; i<8; i++) {
-        c = str[i];
-        if (i==5) {
-            lcdData('.');
-        }
-        lcdData(c);
-    }
-}
-
-
-// }}}
-// {{{ void update()
-void update()
-{
-    long int f;
-
-    if (tx) {
-        f = freq;
-        if (shiftSwitch)
-            f += shift;
-        setFreq(f);
-        display(f);
-        lcdCmd(0xcf);
-        lcdData('T');
-    }
-    else {
-        setFreq(freq - IF);
-        display(freq);
-        lcdCmd(0xcf);
-        lcdData('R');
-    }
-}
-
-
-// }}}
-
 // }}}
 
 // {{{ void updateDisplay(void)
@@ -1254,6 +1319,7 @@ void showSMeter(void)
     DisplayBuffer[1][(inputStateSMeter/2)+1] = ' ';
 #else
     short n = 15;
+    int level = inputStateSMeter;
 
     lcdCmd(0xc0);
 
@@ -1582,7 +1648,8 @@ void mainLoop(void)
 
                 // suppress frequency change during transmit
                 if (Transmitting) inputStateRotary = IDLE;
-
+        
+            
                 switch (inputStateRotary)
                 {
                     case UPEVENT :
@@ -1597,6 +1664,10 @@ void mainLoop(void)
                         setFrequency();
                         break;
                 }
+#ifdef DBG_LOGGING
+                fprintf(dbg, "fr-%ld \n",DialFrequency);
+#endif
+
                 inputStateRotary = IDLE;
 
                 // }}}
@@ -1629,8 +1700,14 @@ void mainLoop(void)
 
                 switch (inputStateShift)
                 {
-                    case SHIFTEVENT :
-                        ShiftEnable = !ShiftEnable;
+                    case SHIFTONEVENT :
+                        ShiftEnable = TRUE;
+                        setFrequency();
+                        inputStateShift= IDLE;
+                        break;
+
+                    case SHIFTOFFEVENT :
+                        ShiftEnable = FALSE;
                         setFrequency();
                         inputStateShift= IDLE;
                         break;
@@ -2039,7 +2116,7 @@ void mainLoop(void)
                 {
                     case UPEVENT :
                     case DOWNEVENT : 
-                        DirectMenuReturn = (DirectMenuReturn) ? FALSE : TRUE;
+                        DirectMenuReturn = !DirectMenuReturn;
                         inputStateRotary = IDLE;
                         subMenuValues1[menuLoopState & STATEMASK] = DirectMenuReturn;
                         break;
@@ -2052,7 +2129,6 @@ void mainLoop(void)
                     case SELECTEVENT :
                         // immediate switch back to mainmenu selection
                         menuLoopState = MSETTINGS;
-
                         subMenuValues1[menuLoopState & STATEMASK] = DirectMenuReturn;
                         inputStateSelector= IDLE;
                         break;
@@ -2093,8 +2169,7 @@ void mainLoop(void)
                     case SELECTEVENT :
                         // immediate switch back to mainmenu selection
                         menuLoopState = MSETTINGS;
-
-                        subMenuValues1[menuLoopState & STATEMASK] = DirectMenuReturn;
+                        subMenuValues1[menuLoopState & STATEMASK] = refFreqPLL[refFreqIndex];
                         inputStateSelector= IDLE;
                         break;
                 }
@@ -2107,6 +2182,7 @@ void mainLoop(void)
                 // }}}
         }
         // {{{ scanner
+#ifdef TESTING
         if (Scanning)
         {   
             int StepDelay=125;
@@ -2121,7 +2197,11 @@ void mainLoop(void)
                 setFrequency();
             }
         }   
+#else
+        // $$$ FHE TODO
+#endif
         // }}}
+// {{{ squelch
 
         if ((!Transmitting) && (menuLoopState == TUNING)) 
             showSMeter();
@@ -2130,6 +2210,9 @@ void mainLoop(void)
 
         Muted = (inputStateSMeter < MuteLevel);
         setMuted();
+
+// }}}
+
         updateDisplay();
 
         // }}}
@@ -2165,10 +2248,10 @@ void mainLoop(void)
             printf("Scanning        =      %3s  | ",yesno(Scanning));
             printf("\r\n");
 
-            printf("Scan Start      = %4d.%03d  | ", ScanStartFrequency/1000, ScanStartFrequency%1000);
+            printf("Scan Start      = %4d.%03d  | ", (int)ScanStartFrequency/1000, (int)ScanStartFrequency%1000);
             printf("\r\n");
 
-            printf("Scan End        = %4d.%03d  | ", ScanEndFrequency/1000, ScanEndFrequency%1000);
+            printf("Scan End        = %4d.%03d  | ", (int)ScanEndFrequency/1000, (int)ScanEndFrequency%1000);
             printf("\r\n");
 
             // printf("currentTime     = %8d\r\n",currentTime);
@@ -2208,11 +2291,13 @@ int main(int argc, char *argv[])
     printf("q quit\n"); 
     printf("[ upward rotating           ] downward rotating\n"); 
     printf("t transmit                  r receive\n"); 
-    printf("s toggle shift on/off       l toggle large steps on/off\n"); 
-    printf("e menu selector button\n");
+    printf("s shift on                  a shift off\n");
+    printf("e menu selector button      l toggle large steps on/off\n"); 
     printf("\n");
     set_conio_terminal_mode();
-    // dbg = fopen("log.txt","w");
+#ifdef DBG_LOGGING
+    dbg = fopen("log.txt","w");
+#endif
 #endif
 
     // }}}
@@ -2224,7 +2309,9 @@ int main(int argc, char *argv[])
     // {{{ testing
 
 #ifdef TESTING
-    // fclose(dbg);
+#ifdef DBG_LOGGING
+    fclose(dbg);
+#endif
     // cursor back on
     printf("\033[?25h");   
     // int i;
