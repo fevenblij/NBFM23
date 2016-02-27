@@ -255,17 +255,15 @@ typedef unsigned char u08;
 // write data  : RS=1, RW=1 <8 bit data>
 // read  data  : RS=1, RW=0 <8 bit data>
 // }}}
-// {{{ Stubs for test code
-
 #ifdef TESTING
+// {{{ All of these should be removed
 
 unsigned char _BV(unsigned char c) { return c; }
 void _delay_us(short s) {} 
 void _delay_ms(short s) {} 
 
-#endif
-
 // }}}
+#endif
 // {{{ Function Prototypes
 
 void updateDisplay(void);
@@ -285,6 +283,7 @@ void showFrequency(short r, long f);
 void lcdStr(char *s);
 
 // }}}
+
 // {{{ Globals
 
 #ifdef TESTING
@@ -337,6 +336,7 @@ char  SS_TxRxIndicator;
 int   SS_SMeterIn;              // value read from the s-meter ADC
 long  SS_ScanStartFrequency;    // duh...
 long  SS_ScanEndFrequency;      // duh...
+long  SS_PllFrequency;          // the frequency the PLL needs to generate
 
 char  Line[DISPLAY_WIDTH+10];
 char  DisplayBuffer[LINECOUNT][DISPLAY_WIDTH+5];
@@ -412,14 +412,15 @@ char vInRotState=9;
 //short S;
 #endif
 /*
-   char inputStateRotary;
-   char inputStateSelector;
-   char inputStateShift;
-   char inputStatePTT;
-   char inputStateSMeter;
-   char inputStateLargeStep;
- */
+char inputStateRotary;
+char inputStateSelector;
+char inputStateShift;
+char inputStatePTT;
+char inputStateSMeter;
+char inputStateLargeStep;
+*/
 // }}}
+
 // {{{ Interrupt Service Routines
 
 // {{{ Rotary Pulse : Full cylcle per click
@@ -503,7 +504,7 @@ ISR(PCINT2_vect)
 
     // find out which line caused an interrupt
     char aLineChanged = (((sample ^ IntRotLines) & ALINEMASK) != 0);
-    //  char bLineChanged = (((sample ^ IntRotLines) & BLINEMASK) != 0);
+//  char bLineChanged = (((sample ^ IntRotLines) & BLINEMASK) != 0);
 
     // polarity is TRUE  when the A line caused the interrupt;
     // polarity is FALSE when the B line caused the interrupt;
@@ -519,7 +520,7 @@ ISR(PCINT2_vect)
     // eval now implements the truth table for an A line triggered interrupt
     // the B line has the exact opposite truth table, so we can simple XOR with 
     // the polarity value. (see documentation at the start of this ISR)
-
+    
     if (eval ^ polarity)
         SS_RotaryCount++;
     else
@@ -721,7 +722,7 @@ void initPLL(void)
     reg = (2UL<<16) + ((SS_PllReferenceFrequency/CHANNELSTEP)<<2);
     setPLL(reg);
 
-    setFreq(SS_VfoFrequency);
+    setFreq(SS_PllFrequency);
 
     reg = 0x438082;
     setPLL(reg);
@@ -781,7 +782,6 @@ void initPORTS(void)
 void initialize(void)
 {
     SS_BaseFrequency        = INITIAL_FREQUENCY;
-    SS_VfoFrequency         = SS_BaseFrequency - IF;
     SS_FrequencyShift       = INITIAL_SHIFT;
     SS_ScanStartFrequency   = INITIAL_FREQUENCY;
     SS_ScanEndFrequency     = BANDTOP;
@@ -806,11 +806,8 @@ void initialize(void)
 // }}}
 
 // }}}
-// {{{ Scaffolding test code
-
 #ifdef TESTING
-
-// {{{ Output Scaffolding
+// {{{ Scaffolding
 
 // {{{ ttyControl
 
@@ -834,7 +831,6 @@ void ttyClearScreen(void)
 
 // }}}
 // {{{ Display emulator
-
 // {{{ deSetCursorPosition
 
 void deSetCursorPosition(short row, short col)
@@ -958,8 +954,6 @@ char* yesno(short boolean)
 
 // }}}
 
-
-// }}}
 // {{{ Input Scaffolding
 
 #ifdef TESTING
@@ -1003,8 +997,6 @@ short FHEgetchar()
     }
 }
 
-// non blocking getkeyboard function
-// return FALSE if no character is available
 char FHEgetc(void)
 {
     char c;
@@ -1037,9 +1029,8 @@ void FHEungetc(char c)
 
 // }}}
 
-#endif
-
 // }}}
+#endif
 // {{{ input functions
 
 #ifdef TESTING
@@ -1090,6 +1081,7 @@ short bounce(short clock, short data, short bounceSelect, short newState)
 }
 
 // }}}
+
 #endif
 
 // feb 2016
@@ -2884,63 +2876,18 @@ void mainLoop(void)
         SS_PTT         = InputGetPTT();
         SS_SMeterIn    = InputGetSMeter();
 
-        // {{{ read keyboard for test
+        // {{{ read keyboard
 
 #ifdef TESTING
-        // clear now, set to TRUE and process when 'e' key is pressed
-        SS_Selected = FALSE;
-
-        char theKey;
         char c;
         if ((c = FHEgetc()))
-        {
-            theKey = c;
-            switch (c)
-            {
-                case 27  : // 27 is the ESCAPE character
-                case 'q' : busy = FALSE;
-                           theKey = c;
-                           break;
+            busy = !((c == 'q') || (c == 27)); // not 'q' and not escape
 
-                case '[' : SS_RotaryCount = -1;
-                           theKey = c;
-                           break;
-
-                case ']' : SS_RotaryCount = +1;
-                           theKey = c;
-                           break;
-
-                case 't' : SS_PTT = TRUE;
-                           theKey = c;
-                           break;
-
-                case 'r' : SS_PTT = FALSE;
-                           theKey = c;
-                           break;
-
-                case 's' : SS_ShiftEnable = TRUE;
-                           theKey = c;
-                           break;
-
-                case 'a' : SS_ShiftEnable = FALSE;
-                           theKey = c;
-                           break;
-
-                case 'e' : SS_Selected = TRUE;
-                           theKey = c;
-                           break;
-
-                default:
-                           // swallow unused input characters by 
-                           // calling the non-blocking FHEgetc();
-                           (void)FHEgetc();
-            }
-        }
-
+        // swallow unused input characters
+        (void)FHEgetc();
 #endif
 
         // }}}
-
         // }}} input handling
         // {{{ Remote Control will take place here
         // }}}
@@ -2986,7 +2933,7 @@ void mainLoop(void)
         OutputSetDisplaySMeter(SS_DisplaySMeter);
         OutputSetDisplayMuteIndicator(SS_MuteIndicator);
         OutputSetDisplayTxRxIndicator(SS_TxRxIndicator);
-        OutputSetDisplayFrequency(SS_BaseFrequency);
+        OutputSetDisplayFrequency(SS_DisplayFrequency);
 
         OutputSetVfoFrequency(SS_VfoFrequency);
         OutputSetTransmitterOn(SS_Transmitting);
@@ -3036,7 +2983,7 @@ void mainLoop(void)
             // printf("prevStepTime    = %8d\r\n",prevStepTime);
             // printf("ctcssIndex      = %8d\r\n",ctcssIndex);
             // printf("vInRotState     = %8d\r\n",vInRotState);
-            printf("keypressed  = %8X\r\n",theKey);
+            // printf("unget charbuf   = %8X\r\n",GetcBuffer);
             // printf("unget charvail  = %8s\r\n",yesno(GetcAvail));
             printf("========================================================\r\n");
             // printf("|%-*s|\r\n", DISPLAY_WIDTH, DisplayBuffer[0]);
@@ -3051,7 +2998,6 @@ void mainLoop(void)
         }
 #endif
         // }}}
-
         updateDisplay();
         // }}} Output handling
     }
@@ -3070,7 +3016,7 @@ int main(int argc, char *argv[])
     printf("========= 23cm NBFM control software simulator =========\n");
     printf("\n");
     printf("q quit\n"); 
-    printf("[ downward rotating         ] upward rotating\n"); 
+    printf("[ upward rotating           ] downward rotating\n"); 
     printf("t transmit                  r receive\n"); 
     printf("s shift on                  a shift off\n");
     printf("e menu selector button      l toggle large steps on/off\n"); 
@@ -3092,8 +3038,6 @@ int main(int argc, char *argv[])
 #ifdef DBG_LOGGING
     fclose(dbg);
 #endif
-    // position cursor below lowest printed line
-    ttySetCursorPosition(25,0);
     // cursor back on
     printf("\033[?25h");   
     // short i;
