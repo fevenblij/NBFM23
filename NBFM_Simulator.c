@@ -1,6 +1,6 @@
-// vim: ts=4 et sw=4 foldmethod=marker
 // zR open all folds    zM close all folds   zf define fold
 // {{{ Documentation
+// vim: ts=4 et sw=4 foldmethod=marker
 //
 // Inputs: 
 // 1) Rotary knob
@@ -20,13 +20,29 @@
 // 3) CTCSS enable
 // 4) Mute level
 // 
-// }}}
 // #define TESTING "this is the simulation. #UNDEF for the real thing" 
 // #define  DBG_LOGGING "used during testing to log debug info"
+
+// The variable field width operator (%*s) in the printf library does not work for the ATMEGA328.
+// This is the reason you will see the complex string hack in the output routines
+
+/* How to add a menu item :
+
+   - Add define to "defines generic"
+   - Add entry to the menu datastructure in "globals"
+   - Update length of the menu entry arrays (now done automatic)
+
+   - Add entry to ProcessingHandler/Rotary Handling/Menu Scrolling
+   - Add entry to ProcessingHandler/Selector Button/Select pushed during Menu browsing
+   - Add entry to ProcessingHandler/Selector Button/Select pushed during Value editing
+
+   - Add entry to BottomLinePrinter
+ */
+// }}}
 // {{{ includes
 
 // F_CPU used in util/delay.h
-#define F_CPU       8000000UL
+#define F_CPU       1000000UL
 
 #include <stdio.h>
 #include <string.h>
@@ -54,50 +70,13 @@
 // }}}
 // {{{ defines generic
 
-#define NEWROTARY 1
-
 #define TRUE (1==1)
 #define FALSE (!TRUE)
 
-#define IF                  69300UL     // in kHz
-#define INITIAL_FREQUENCY   1298200UL   // in kHz    
-#define INITIAL_SHIFT       -28         // in MHz
-#define INITIAL_CTCSS       0           // in cHz
-#define INITIAL_MUTELEVEL   5           // scalar
-#define INITIAL_REFERENCE   12000UL     // in kHz
-#define CHANNELSTEP         25          // in kHz
-#define LARGESTEP           1000        // in kHz
-#define BANDBOTTOM          1240000UL   // in kHz
-#define BANDTOP             1300000UL   // in kHz
-
-#define DISPLAY_WIDTH       16
-#define LINECOUNT           2
-
-// {{{ input events
-#define IDLE                -10
-#define UPEVENT             1
-#define DOWNEVENT           2
-#define TXEVENT             3
-#define RXEVENT             4
-#define SELECTEVENT         5
-#define SELECTBOUNCING      6
-#define SELECTWAITRELEASE   7
-#define SHIFTONEVENT        8
-#define SHIFTOFFEVENT       9
-#define LARGEEVENT          10
-// }}}
-
 // {{{ States
 
-// Lower 6 bits are for state indicator (64 state range)
-// Higher order 10 bites are for type indicator (1024 types range)
-
-#define STATEMASK           0x002F
-#define TYPEMASK            0xFFC0
-
-#define TUNING              0
 // {{{ Main menu select states
-#define MAINMENU            64
+#define MAINMENU            0
 #define MMUTELEVEL          (MAINMENU+0)
 #define MSHIFT              (MAINMENU+1)
 #define MCTCSS              (MAINMENU+2)
@@ -105,44 +84,58 @@
 #define MSEND               (MAINMENU+4)
 #define MSCAN               (MAINMENU+5)
 #define MSETTINGS           (MAINMENU+6)
-#define MBACK               (MAINMENU+7)
-#define MAINMENU_END        (MAINMENU+7)
-// }}}
-// {{{ Main menu value states
-#define MAINMENU_VAL        128
-#define MMUTELEVELVAR       (MAINMENU_VAL+0)
-#define MSHIFTVAR           (MAINMENU_VAL+1)
-#define MCTCSSVAR           (MAINMENU_VAL+2)
-#define MSSTARTVAR          (MAINMENU_VAL+3)
-#define MSENDVAR            (MAINMENU_VAL+4)
-#define MAINMENU_VAL_END    (MAINMENU_VAL+4)
+#define MBACK2TUNE          (MAINMENU+7)
 // }}}
 // {{{ Submenu states
-#define SUBMENU1            192
-#define MARETURNMODE        (SUBMENU1+0)
-#define MAREFFREQ           (SUBMENU1+1)
-#define SUBMENU1_END        (SUBMENU1+1)
-// }}}
-// {{{ Submenu value states
-#define SUBMENU1_VAL        256
-#define MARETURNMODEVAR     (SUBMENU1_VAL+0)
-#define MAREFFREQVAR        (SUBMENU1_VAL+1)
-#define SUBMENU1_VAL_END    (SUBMENU1_VAL+1)
+#define SUBMENU1            (MAINMENU+8)
+#define MARETURNMODE        (MAINMENU+8)
+#define MAPLLREFMHZ         (MAINMENU+9)
+#define MAPLLREFKHZ         (MAINMENU+10)
+#define MABAUDRATE          (MAINMENU+11)
+#define MAROTARYTYPE        (MAINMENU+12)
+#define MAREMOTEENABLE      (MAINMENU+13)
+#define MAFRONTENABLE       (MAINMENU+14)
+#define MABACK2MAIN         (MAINMENU+15)
+#define MAFACTORYRESET      (MAINMENU+16)
 // }}}
 
 // }}} States
+// {{{ facdtory settings
+
+#define IF                  69300UL     // in kHz
+#define INITIAL_FREQUENCY   1298200UL   // in kHz    
+#define INITIAL_SHIFT       -28000L     // in kHz
+#define INITIAL_CTCSS       0           // in cHz
+#define INITIAL_MUTELEVEL   10          // scalar
+#define INITIAL_REFERENCE   13000UL     // in kHz
+#define CHANNELSTEP         25          // in kHz
+#define LARGESTEP           1000        // in kHz
+#define BANDBOTTOM          1240000UL   // in kHz
+#define BANDTOP             1300000UL   // in kHz
+
+// }}}
+
+#define IF                  69300UL     // in kHz
+#define INITIAL_FREQUENCY   1298200UL   // in kHz    
+#define INITIAL_SHIFT       -28000L     // in kHz
+#define INITIAL_CTCSS       0           // in cHz (centi Hertz)
+#define INITIAL_MUTELEVEL   10          // scalar
+#define INITIAL_REFERENCE   13000UL     // in kHz
+#define CHANNELSTEP         25          // in kHz
+#define LARGESTEP           1000        // in kHz
+#define BANDBOTTOM          1240000UL   // in kHz
+#define BANDTOP             1300000UL   // in kHz
+
+#define DISPLAY_WIDTH       16
+#define DISPLAY_HEIGHT       2
 
 #define MAXMUTELEVEL        32
-#define MINSHIFT            -60
-#define MAXSHIFT            60
-#define MINCTCSS            10
-#define MAXCTCSS            90
+#define MINSHIFT            -60000L
+#define MAXSHIFT            60000L
 
 #define SELECTBOUNCEDELAY   1   // mainloop cycle time = 34 ms.
 
 #ifdef TESTING
-#define DE_WIDTH    16
-#define DE_HEIGHT    2
 #define YTop        10
 #define XTop        21
 #define DBGROW      14
@@ -151,7 +144,8 @@
 // }}}
 // {{{ defines for ATMEGA328 
 #ifdef TESTING
-
+#define eeprom_write_dword(a,b) 
+//      port-nr      pin-nr  function
 #define PB0 0       // (14) display - E
 #define PB1 1       // (15) display - RS
 #define PB2 2       // (16) not used
@@ -179,15 +173,16 @@
 #define PD6 6       // (12) not used
 #define PD7 7       // (13) not used
 
-//short tx;
-//long  freq;
-//short shiftSwitch;
-//short shift;
-//char str[50];
 short ports[10];
 #define PORTB ports[1]
 #define PORTC ports[2]
-
+#define PORTD ports[3]
+#define DDRB  ports[4]
+#define DDRC  ports[5]
+#define DDRD  ports[6]
+#define PINB  ports[7]
+#define PINC  ports[7]
+#define PIND  ports[7]
 #endif
 
 
@@ -268,116 +263,189 @@ void _delay_ms(short s) {}
 // }}}
 // {{{ Function Prototypes
 
-void updateDisplay(void);
-void showTrx(void);
-void setFreq(long f);
 void initPLL(void);
 void initLCD(void);
 void initADC(void);
+
 void deFrame(void);
+void lcdStr(char *s);
+void lcdStr16(char *s);
 void lcdCmd(char c);
 void lcdData(char c);
 void lcdHome(void);
 void lcdNib(char);
-void setPLL(long c);
-void setMuted(void);
-void showFrequency(short r, long f);
-void lcdStr(char *s);
+void lcdCursorPosition(int row, int col);
 
+void OutputSetPLL(int32_t c);
+void OutputSetVfoFrequency(int32_t SS_VfoFrequency);
+void OutputSetTransmitterOn(char boolean);
+
+void WritePersistent(int index);
+int32_t ReadPersistent(int index);
+
+#ifdef TESTING
+void initPersistentStorage(void);
+#endif
 // }}}
 // {{{ Globals
 
+// {{{ System State variables
+
+volatile int   IRQ_RotaryChange;        // amount of steps to take 
+volatile char  IRQ_SelectorPushed;      // boolean: Pushed = true; Idle = false;
+volatile char  IRQ_Ticks;
+
+int         SS_RotaryCount;
+int         SS_RotaryType;              // int: 0=click per cycle (classic), 1=click per pulse
+char        SS_Tuning;                  // boolean: tuning = true, in menu = false
+char        SS_Transmitting;            // boolean: TX = true, RX = false;
+char        SS_Scanning;                // boolean: scanning = true;
+char        SS_Muted;                   // boolean: TRUE=audio muted, FALSE=audio on 
+char        SS_ShiftChange;             // int: 0=no change, 1 = actived, 2 = deactivated
+char        SS_ShiftEnable;             // boolean: shifted = true;
+char        SS_ReverseShift;            // boolean: swap transmit and receive frequencies = true
+uint32_t    SS_CtcssFrequency;          // the tone value to inject
+int8_t      SS_CtcssIndex;            
+int8_t      SS_BaudrateIndex;            
+uint32_t    SS_Baudrate;
+int         SS_MenuState;               // state of the current user input menu
+int         SS_MenuIndex;               // position in the value lists
+char        SS_MuteIndicator;           // marker to display when audio is muted
+uint8_t     SS_MuteLevel;               // level below which the audio will be muted
+int32_t     SS_FrequencyShift;          // shift value to use during repeater shift
+int32_t     SS_BaseFrequency;           // tuned with the rotary dial. All freqs are derived from this var.
+int32_t     SS_VfoFrequency;            // the frequency to VFO must be tuned to 
+int32_t     SS_DisplayFrequency;        // frequency to show on display
+int16_t     SS_DisplaySMeter;           // value to show on display
+int16_t     SS_SMeterIn;                // value read from the s-meter ADC
+
+char        SS_Selected;
+char        SS_PTT;
+char        SS_TxRxIndicator;
+int32_t     SS_ScanStartFrequency;      // duh...
+int32_t     SS_ScanEndFrequency;        // duh...
+
+char        SS_DirectMenuReturn;        // boolean: if true, direct return to tuning on entering a value
+char        SS_FrontEnable;             // boolean to en/disable the frontpanel switches
+char        SS_RemoteEnable;            // boolean to en/disable the remote control function
+// int   SS_SMeterCalib;
+uint32_t    SS_PllReferenceFrequency;   // frequency that is used as PLL reference
+
+char  SS_ValueEdit;
+
+// }}}  System State variables
+// {{{ Menu
+//
+// Menu's
+//
+
+// level definitions
+#define ML_MAIN 0
+#define ML_SUB1 1
+
+// datatype defintions
+#define MD_NONE 0
+#define MD_INT  1
+#define MD_STR  2
+#define MD_BOOL 3
+
+struct MenuInfoStruct
+{
+    uint8_t level;
+    uint8_t start;
+    uint8_t last;
+    uint8_t length;
+};
+
+struct MenuStruct
+{
+    char    *name;
+    uint8_t level;
+    uint8_t position;
+    uint8_t datatype;
+    char    *format;
+    int32_t value;
+};
+
+// If an extra submenu would be introduced, then you would need to add the following record:
+// { ML_SUB2, <index_of_first_entry>, <index_of_last_entry>, <nr_of_entries> }
+// and off course we need: #define ML_SUB2  2
+
+
+struct MenuInfoStruct infoMenu[] = 
+{
+//    level    start     end          nr of entries (length)
+    { ML_MAIN, MAINMENU, MBACK2TUNE , MBACK2TUNE-MAINMENU + 1 },
+    { ML_SUB1, SUBMENU1, MABACK2MAIN, MABACK2MAIN-SUBMENU1 + 1 }    // for now, skip factory reset
+};
+
+// formula for next menu item to display
+// f(x) = (( x – start + Nsteps ) % length ) + start
+
+// enter all menu items in the datastructure below
+
+struct MenuStruct theMenu[] = 
+{
+    { "Mute Level"    , ML_MAIN, 0, MD_INT , "%s%2d"           , INITIAL_MUTELEVEL   },    // 00
 #ifdef TESTING
+    { "Shift"         , ML_MAIN, 1, MD_INT , "%s%4d.%03d MHz"  , INITIAL_SHIFT       },    // 01
+    { "CTCSS"         , ML_MAIN, 2, MD_INT , "%s%3u.%1u Hz"    , INITIAL_CTCSS       },    // 02
+    { "Scan Start"    , ML_MAIN, 3, MD_INT , "%s%4u.%03u MHz"  , BANDBOTTOM          },    // 03
+    { "Scan End"      , ML_MAIN, 4, MD_INT , "%s%4u.%03u MHz"  , BANDTOP             },    // 04
+#else
+    { "Shift"         , ML_MAIN, 1, MD_INT , "%s%4ld.%03ld MHz", INITIAL_SHIFT       },    // 01
+    { "CTCSS"         , ML_MAIN, 2, MD_INT , "%s%3u.%1u Hz"    , INITIAL_CTCSS       },    // 02
+    { "Scan Start"    , ML_MAIN, 3, MD_INT , "%s%4lu.%03lu MHz", BANDBOTTOM          },    // 03
+    { "Scan End"      , ML_MAIN, 4, MD_INT , "%s%4lu.%03lu MHz", BANDTOP             },    // 04
+#endif
+    { "Start Scanning", ML_MAIN, 5, MD_NONE, ""                , 0                   },    // 05 "value" unused
+    { "Settings"      , ML_MAIN, 6, MD_NONE, ""                , 0                   },    // 06 "value" unused
+    { "Back to tune"  , ML_MAIN, 7, MD_NONE, ""                , 0                   },    // 07 "value" unused
+    { "On select go"  , ML_SUB1, 0, MD_BOOL, "%s%s"            , TRUE                },    // 08
+#ifdef TESTING
+    { "PLL Ref MHz"   , ML_SUB1, 1, MD_INT , "%s%4u.%03u MHz"  , INITIAL_REFERENCE   },    // 09
+    { "PLL Ref kHz"   , ML_SUB1, 2, MD_INT , "%s%4u.%03u MHz"  , INITIAL_REFERENCE   },    // 10
+    { "Baudrate"      , ML_SUB1, 3, MD_INT , "%s%6d"           , 9600                },    // 11
+#else
+    { "PLL Ref MHz"   , ML_SUB1, 1, MD_INT , "%s%4lu.%03lu MHz", INITIAL_REFERENCE   },    // 09
+    { "PLL Ref kHz"   , ML_SUB1, 2, MD_INT , "%s%4lu.%03lu MHz", INITIAL_REFERENCE   },    // 10
+    { "Baudrate"      , ML_SUB1, 3, MD_INT , "%s%6ld"          , 9600                },    // 11
+#endif
+    { "Rotary type"   , ML_SUB1, 4, MD_BOOL, "%s%s"            , FALSE               },    // 13
+    { "Remote enable" , ML_SUB1, 5, MD_BOOL, "%s%s"            , FALSE               },    // 14
+    { "Front enable"  , ML_SUB1, 6, MD_BOOL, "%s%s"            , TRUE                },    // 15
+    { "Back to main"  , ML_SUB1, 7, MD_NONE, ""                , 0                   },    // 16 "value" unused
+    { "Factory reset" , ML_SUB1, 8, MD_NONE, "%s%s"            , 0                   },    // 17 "value" unused
+};
+
+// }}}
+
+#ifdef TESTING
+clock_t now;
+char  tmpFreqChanged=FALSE;
+char  tmpFreqSaved=FALSE;
+char  AutoTest=FALSE;        // set to true via commandline when automated testing is in order
+char  dbg_logging=FALSE;     // set to true via commandline when we need debug logging
 short goingUp;               // tmp global
 short LoopCounter;           // tmp global
 short cpos;                  // display: lineair cursor position
 #endif
-short currentTime;           // tmp global
-short prevStepTime;
-short goStep;
+
+uint16_t currentTime;        // tmp global
+uint16_t prevStepTime;       // tells scanner when it is time for the next channel
+uint16_t goStep;
+uint32_t lastFrequencyChange;   // keeps track of time since last tuning action
+uint16_t TimerValue;         // value to program in the timer
 
 char GClkPrev;               // used for rotary dial handling
-char GQdPrev;                // used for rotary dial handling
-char GQd;                    // used for rotary dial handling
 
-char DisplayDirty;           // indicates the display buffer has been updated
-
-short LowPass;               // Variable for S-meter lowpass filter
+uint16_t LowPass;            // Variable for S-meter lowpass filter
 char  IntRotLines;           // remember status of rotary switch inputs
-// {{{ System State variables
 
-volatile int   SS_RotaryChange;    // amount of steps to take 
-volatile char  SS_SelectorPushed;  // boolean: Pushed = true; Idle = false;
 
-int   SS_RotaryCount;
-char  SS_Transmitting;          // boolean: TX = true, RX = false;
-char  SS_Scanning;              // boolean: scanning = true;
-char  SS_Muted;                 // boolean: TRUE=audio muted, FALSE=audio on 
-char  SS_ShiftEnable;           // boolean: shifted = true;
-char  SS_ReverseShift;          // boolean: swap transmit and receive frequencies = true
-char  SS_CtcssIndex;            
-int   SS_CtcssFrequency;        // the tone value to inject
-int   SS_MenuState;             // state of the current user input menu
-char  SS_MuteIndicator;
-int   SS_MuteLevel;             // level below which the audio will be muted
-long  SS_FrequencyShift;        // shift value to use during repeater shift
-long  SS_BaseFrequency;         // tuned with the rotary dial. All freqs are derived from this var.
-long  SS_VfoFrequency;          // the frequency to VFO must be tuned to 
-long  SS_DisplayFrequency;      // frequency to show on display
-int   SS_DisplaySMeter;         // value to show on display
-
-char  SS_DirectMenuReturn;      // boolean:
-long  SS_PllReferenceFrequency; // frequency that is used as PLL reference
-
-// }}}  System State variables
-
-char  SS_Selected;
-char  SS_PTT;
-char  SS_TxRxIndicator;
-int   SS_SMeterIn;              // value read from the s-meter ADC
-long  SS_ScanStartFrequency;    // duh...
-long  SS_ScanEndFrequency;      // duh...
+int32_t prevFreq;            // used to determine if the freq display needs updating
 
 char  Line[DISPLAY_WIDTH+10];
-char  DisplayBuffer[LINECOUNT][DISPLAY_WIDTH+5];
-
-// Menu
-// 
-#define MENULENGTH 8
-char *menuStrings[] = { 
-    //234567890123456
-    "Mute level",       // 0
-    "Shift",            // 1
-    "CTCSS",            // 2
-    "Scan Start",       // 3
-    "Scan End",         // 4
-    "Scan",             // 5
-    "Settings",         // 6
-    "Back"};            // 7
-
-long  menuValues [] =  {  
-    INITIAL_MUTELEVEL,  // 0
-    INITIAL_SHIFT,      // 1
-    INITIAL_CTCSS,      // 2
-    1280000L,           // 3
-    1290000L,           // 4
-    0,                  // 5
-    0,                  // 6
-    0};                 // 7
-
-#define SUBMENULENGTH 2
-char *subMenuStrings1[] = {
-    //234567890123456
-    "Select action:",   // 0
-    "PLL Ref:"          // 1
-};
-
-long subMenuValues1 [] = {
-    TRUE,               // 0
-    INITIAL_REFERENCE   // 1
-};
-
-short menuLoopState;
 
 // define S-meter chars
 unsigned char smeter[3][8] = {
@@ -385,90 +453,48 @@ unsigned char smeter[3][8] = {
     {0b00000,0b00000,0b10100,0b10100,0b10100,0b10100,0b00000,0b00000},
     {0b00000,0b00000,0b10101,0b10101,0b10101,0b10101,0b00000,0b00000}
 };
+
 //CTCSS frequencies
-short CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
+uint16_t CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
     1000,1035,1072,1109,1148,1188,1230,1273,1318,1365,1413,1462,1514,1567,1598,
     1622,1655,1679,1713,1738,1773,1799,1835,1862,1899,1928,1966,1995,2035,2065,
     2107,2181,2257,2291,2336,2418,2503,2541, -1
 };
-short ctcssIndex;
+// uint8_t ctcssIndex;
+uint8_t ctcssLength = (sizeof(CtcssTones)/sizeof(uint16_t))-2;
 
-short refFreqPLL[] = { 13000, 12000, 10700, -1 };
-short refFreqIndex;
+uint32_t Baudrates[] = { 1200, 2400, 4800, 9600, 19200, 38400, 76800, 115600 };
+uint8_t baudrateLength = 8 - 1;
 
 #ifdef TESTING
-short  theMainEvent;
+// short  theMainEvent;
 char   GetcBuffer;
 short  GetcAvail;
 struct termios orig_termios;
-#ifdef DBG_LOGGING
-FILE *dbg;
-#endif
+FILE   *dbg;
+FILE   *eeprom;
 #endif
 
 // input states controls
 #ifdef TESTING
-char vInRotState=9;
+// char vInRotState=9;
 //short S;
 #endif
-/*
-   char inputStateRotary;
-   char inputStateSelector;
-   char inputStateShift;
-   char inputStatePTT;
-   char inputStateSMeter;
-   char inputStateLargeStep;
- */
+
 // }}}
+
 // {{{ Interrupt Service Routines
 
-// {{{ Rotary Pulse : Full cylcle per click
-
-#ifndef TESTING
-#ifndef NEWROTARY
-
-ISR(INT1_vect)
-{
-    unsigned char sample;
-    sample = PIND;
-
-    data = (sample & ALINEMASK) != 0;
-    clk  = (sample & BLINEMASK)  != 0;
-
-    GQd = data;      
-
-    if (clk && !GClkPrev) 
-    {                    
-        UpDown = data;
-    }
-
-    if (GQd & !GQdPrev)  
-    {                    
-        if (UpDown)
-            SS_RotaryCount++;
-        else
-            SS_RotaryCount--; 
-    }
-
-    GClkPrev = clk;
-    GQdPrev  = GQd;
-}
-
-#endif
-#endif
-
-// }}}
 // {{{ Rotary Pulse : Single line change per click
 
 #ifndef TESTING
-#ifdef NEWROTARY
 
 #define ALINE    0x02
 #define IRQMASK  0x06
 
 // {{{ documentation rotary encoder handling
 
-//  A line caused interrupt (A line changed polarity)
+//  A line caused interrupt (A line changed direction)
 //   | A | B | Step
 //   +---+---+-----
 //   | 0 | 0 |  -1 
@@ -476,7 +502,7 @@ ISR(INT1_vect)
 //   | 0 | 1 |  +1 
 //   | 1 | 1 |  -1 
 
-//  B line caused interrupt (B line changed polarity)
+//  B line caused interrupt (B line changed direction)
 //   | A | B | Step
 //   +---+---+-----
 //   | 0 | 0 |  +1 
@@ -493,40 +519,43 @@ ISR(INT1_vect)
 
 ISR(PCINT2_vect)
 {
-    char aLine;
-    char bLine;
-    char polarity;
-    char eval;
+    // only active with rotary type=1
+    if (SS_RotaryType == 1)
+    {
+        char aLine;
+        char bLine;
+        char direction;
+        char eval;
 
-    // sample the PIND register value;
-    char sample = PIND;
+        // sample the PIND register value;
+        char sample = PIND;
 
-    // find out which line caused an interrupt
-    char aLineChanged = (((sample ^ IntRotLines) & ALINEMASK) != 0);
-    //  char bLineChanged = (((sample ^ IntRotLines) & BLINEMASK) != 0);
+        // find out which line caused an interrupt
+        char aLineChanged = (((sample ^ IntRotLines) & ALINEMASK) != 0);
+        //  char bLineChanged = (((sample ^ IntRotLines) & BLINEMASK) != 0);
 
-    // polarity is TRUE  when the A line caused the interrupt;
-    // polarity is FALSE when the B line caused the interrupt;
-    polarity = aLineChanged;
+        // direction is TRUE  when the A line caused the interrupt;
+        // direction is FALSE when the B line caused the interrupt;
+        direction = aLineChanged;
 
-    // save current value of the lines;
-    IntRotLines = sample;
+        // save current value of the lines;
+        IntRotLines = sample;
 
-    aLine = (sample & ALINEMASK) != 0;
-    bLine = (sample & BLINEMASK) != 0;
-    eval = aLine ^ bLine;
+        aLine = (sample & ALINEMASK) != 0;
+        bLine = (sample & BLINEMASK) != 0;
+        eval = aLine ^ bLine;
 
-    // eval now implements the truth table for an A line triggered interrupt
-    // the B line has the exact opposite truth table, so we can simple XOR with 
-    // the polarity value. (see documentation at the start of this ISR)
+        // eval now implements the truth table for an A line triggered interrupt
+        // the B line has the exact opposite truth table, so we can simple XOR with 
+        // the direction value. (see documentation at the start of this ISR)
 
-    if (eval ^ polarity)
-        SS_RotaryCount++;
-    else
-        SS_RotaryCount--; 
+        if (eval ^ direction)
+            IRQ_RotaryChange--;
+        else
+            IRQ_RotaryChange++;
+    }
 }
 
-#endif
 #endif
 
 // }}}
@@ -536,17 +565,33 @@ ISR(PCINT2_vect)
 
 ISR(INT0_vect)
 {
+    volatile register char sample;
+
     // The selector line has gone low, so the button was pushed
-    SS_SelectorPushed = TRUE;
+    IRQ_SelectorPushed = TRUE;
+    sample = PIND;      //  make sure the interrupt is acknowledged and cleared
+    sample = EIMSK;     //  make sure the interrupt is acknowledged and cleared
+    sample++;           //  suppress compilter warnings about unused variables;
 }
 
 #endif
 
 // }}}
 // {{{ Timer
+#ifndef TESTING
 
+ISR(TIMER1_OVF_vect) 
+{ 
+    IRQ_Ticks++;              // increment tick for freq save timeout
+    // restart timer
+    TCNT1 = 65536-TimerValue;  
+    if (SS_Transmitting && (SS_CtcssIndex != 0))
+    {
+        tbi(PORTB, Beep);       // toggle Beep port
+    }
+} 
 
-
+#endif
 // }}}
 
 // }}}
@@ -555,46 +600,23 @@ ISR(INT0_vect)
 
 // {{{ void initIRQ(void)
 
-#ifndef TESTING
-
 void initIRQ(void)
 {
-    // {{{ Rotary Dial Line A (PD3) and line B (PD4)
+#ifndef TESTING
+    cli();      // Disable global interrupts
 
-#ifdef NEWROTARY
+    // {{{ Rotary Dial Line A (PD3) and line B (PD4)
+    // make PD3 (INT1 pin) an input
+    // make PD4 (INT? pin) an input
     DDRD &= ~(1 << DDD3);     // Clear the PD3 ad PD4 in
     DDRD &= ~(1 << DDD4);     // Clear the PD3 ad PD4 in
-    // PD3 (INT1 pin) is now an input
-    // PD4 (INT? pin) is now an input
 
+    // enable pull-up on PD3 and PD4 
     PORTD |= (1 << PORTD3);    // turn On the Pull-up
     PORTD |= (1 << PORTD4);    // turn On the Pull-up
-    // PD3 and PD4 now have pull-up enabled
 
-    PCMSK2 = 0x18;  // enable pin change interrupts 19 en 20
+    PCMSK2 = 0x18;  // enable Pin Change interrupts 19 en 20
     PCICR  = 0x04;  // enable Pin Change Interrupt Enable 2
-    // External Interrupt Control Register A
-    // set Interrupt Sense Control ISC11 and ISC10 to 01 for dual edge trigger
-    EICRA |= _BV(ISC10);  // set INT1 to trigger on ANY logic change
-
-    // External Interrupt Mask register
-    EIMSK |= _BV(INT1);    // Turns on INT1
-
-
-#else
-
-    DDRD &= ~(1 << DDD3);     // Clear the PD3 pin
-    // PD3 (INT1 pin) is now an input
-
-    PORTD |= (1 << PORTD3);    // turn On the Pull-up
-    // PD3 is now an input with pull-up enabled
-
-    // External Interrupt Control Register A
-    // set Interrupt Sense Control ISC11 and ISC10 to 01 for dual edge trigger
-    EICRA |= (1 << ISC10);    // set INT1 to trigger on ANY logic change
-    // External Interrupt Mask register
-    EIMSK |= (1 << INT1);     // Turns on INT1
-#endif
 
     // }}}
     // {{{ Selector (PD2)
@@ -614,80 +636,80 @@ void initIRQ(void)
     // }}}
     // {{{ Timer () 
 
+    // Setup Timer 1
+    TCCR1A = 0x00;        // Normal Mode 
+    TCCR1B = 0x01;        // div/1 clock, 1/F_CPU clock
+    TimerValue = 5*F_CPU/SS_CtcssFrequency; // *10/2
 
+    // Enable interrupts as needed 
+    TIMSK1 |= _BV(TOIE1);   // Timer 1 overflow interrupt 
 
     // }}}
 
-    // Enable global interrupts
-    sei(); 
+    sei();      // Enable global interrupts
+#endif
 }
 
-#endif
 // }}}
 // {{{ void initLCD(void)
 void initLCD(void)
 {
-#ifdef TESTING
-    deFrame();
-    showTrx();
-#endif
-
     // allow the lcd controller to wake up
     _delay_ms(100);
 
     // depending on intial state:
     // ... force to state 1 or state 3
     lcdNib(0x30);
-    _delay_ms(10);
+    _delay_ms(20);
 
     // ... and force to state 1
     lcdNib(0x30);
-    _delay_ms(10);
+    _delay_ms(20);
 
     // 4 bits mode, 2 lines
     lcdCmd(dispFUNC); // 0x20
-    _delay_ms(10);
+    _delay_ms(20);
 
     //lcdCmd(dispFUNC);
     //_delay_ms(10);
 
     // cursor shifts to right, text no shift
     lcdCmd(dispSHIF); // 0x18
-    _delay_ms(20);
+    _delay_ms(40);
 
     // display on, no cursor, no blink
     lcdCmd(dispONOF); // 0x0C
-    _delay_ms(20);
+    _delay_ms(40);
 
     // shift mode
     lcdCmd(dispMODE); // 0x06
-    _delay_ms(20);
+    _delay_ms(40);
 
     // clear display
     // leave cursor at top left
     lcdCmd(dispCLEAR); // 0x01
-    _delay_ms(20);
+    _delay_ms(40);
 
-    /*
+
     // define custom chars
-    short i,j;
+    uint8_t i,j;
     lcdCmd(dispCGRA);
     for (i=0; i<3; i++) 
     {
-    for (j=0; j<8; j++) 
-    {
-    lcdData(smeter[i][j]);
+        for (j=0; j<8; j++) 
+        {
+            lcdData(smeter[i][j]);
+        }
     }
-    }
-     */
+
 
     // welcome message 
     lcdHome();
-    _delay_ms(20);
+    _delay_ms(40);
 
     //              0123456789ABCDEF
-    char hello[] = "PA3BJI sw v0.5 ";
-    lcdStr(hello);
+    char hello[] = "PA3BJI sw v0.5  ";
+    lcdStr16(hello);
 }
 
 
@@ -696,6 +718,17 @@ void initLCD(void)
 
 void initADC(void)
 {
+#ifndef TESTING
+    // prescaler: devide by 128
+    // ADC clock = 1MHz / 128 = 7812,5 Hz
+    ADCSRA = (1<<ADPS0)|(1<<ADPS1)|(1<<ADPS2);  
+
+    // Disable digital functions on analog input
+    DIDR0 = (1<<ADC5D);
+
+    // Choose ADC channel 5 
+    ADMUX = (1<<REFS0) + 5;         
+#endif
 }
 
 // }}}
@@ -703,55 +736,27 @@ void initADC(void)
 
 void initPLL(void)
 {
-#ifdef TESTING
-    // $$$FHE Do nothing for now
-#else
-    long reg;
-    SS_PllReferenceFrequency = 13000UL;
+    int32_t reg;
 
+    // clear signal lintes
     cbi(PORTC, ADATA);
     cbi(PORTC, ACLK);
     cbi(PORTC, ALE);
 
-    // set function latch
+    // init function latch
     reg = 0x438086;
-    setPLL(reg);
+    OutputSetPLL(reg);
 
-    // init R-counter
+    // init R-counter c.q. the reference frequency
     reg = (2UL<<16) + ((SS_PllReferenceFrequency/CHANNELSTEP)<<2);
-    setPLL(reg);
+    OutputSetPLL(reg);
 
-    setFreq(SS_VfoFrequency);
+    // init the start up channel
+    OutputSetVfoFrequency(SS_VfoFrequency);
 
+    // init something else
     reg = 0x438082;
-    setPLL(reg);
-#endif
-}
-
-// }}}
-// {{{ void initIRQjpd(void)
-
-void initIRQjpd(void)
-{
-#ifdef TESTING
-#else
-
-    /*
-       EIMSK |= _BV(INT1);
-       EICRA |= _BV(ISC11);
-
-    // Setup Timer 1
-    TCCR1A = 0x00;				// Normal Mode 
-    TCCR1B = 0x01;				// div/1 clock, 1/F_CPU clock
-    // $$$ FHE TODO toneValue = 5*F_CPU/tone;	// *10/2
-
-    // Enable interrupts as needed 
-    TIMSK1 |= _BV(TOIE1);  	// Timer 1 overflow interrupt 
-
-    // enable interrupts
-    sei();
-     */
-#endif
+    OutputSetPLL(reg);
 }
 
 // }}}
@@ -759,20 +764,153 @@ void initIRQjpd(void)
 
 void initPORTS(void)
 {
-#ifdef TESTING
-#else
     // PORTB output for LCD
     DDRB = 0xff;
     PORTB = 0xff;
 
     // PORTC PC0-4 output, PC5 input
     DDRC = 0x1f;
+    // make outputs low
     PORTC = 0x00;
 
     // PORTD is input with pullup
     DDRD = 0x00;
     PORTD = 0xff;
+}
+
+// }}}
+// {{{ void initPersistentStorage()
+
+#ifdef TESTING
+void initPersistentStorage()
+{
+    int32_t zero=0;
+    eeprom = fopen("eeprom.bin","r");
+    if (!eeprom)
+    {
+        eeprom = fopen("eeprom.bin","w");
+        fwrite (&zero,sizeof(int32_t),16,eeprom);
+    }
+    fclose(eeprom);
+    eeprom = fopen("eeprom.bin","r");
+}
 #endif
+
+// }}}
+// {{{ void readPersistentStorage(void)
+
+void readPersistentStorage(void)
+{
+#ifdef TESTING 
+    uint32_t i;
+    for (i=0; i<16; i++)
+    {
+        fread((int32_t *)&theMenu[(int)i].value,1,sizeof(int32_t), eeprom);
+    }
+#else
+    theMenu[(int)0x00].value = eeprom_read_dword((uint32_t *) (0x00*sizeof(uint32_t)));
+    theMenu[(int)0x01].value = eeprom_read_dword((uint32_t *) (0x01*sizeof(uint32_t)));
+    theMenu[(int)0x02].value = eeprom_read_dword((uint32_t *) (0x02*sizeof(uint32_t)));
+    theMenu[(int)0x03].value = eeprom_read_dword((uint32_t *) (0x03*sizeof(uint32_t)));
+    theMenu[(int)0x04].value = eeprom_read_dword((uint32_t *) (0x04*sizeof(uint32_t)));
+    theMenu[(int)0x05].value = eeprom_read_dword((uint32_t *) (0x05*sizeof(uint32_t)));
+    theMenu[(int)0x06].value = eeprom_read_dword((uint32_t *) (0x06*sizeof(uint32_t)));
+    theMenu[(int)0x07].value = eeprom_read_dword((uint32_t *) (0x07*sizeof(uint32_t)));
+    theMenu[(int)0x08].value = eeprom_read_dword((uint32_t *) (0x08*sizeof(uint32_t)));
+    theMenu[(int)0x09].value = eeprom_read_dword((uint32_t *) (0x09*sizeof(uint32_t)));
+    theMenu[(int)0x0A].value = eeprom_read_dword((uint32_t *) (0x0A*sizeof(uint32_t)));
+    theMenu[(int)0x0B].value = eeprom_read_dword((uint32_t *) (0x0B*sizeof(uint32_t)));
+    theMenu[(int)0x0C].value = eeprom_read_dword((uint32_t *) (0x0C*sizeof(uint32_t)));
+    theMenu[(int)0x0D].value = eeprom_read_dword((uint32_t *) (0x0D*sizeof(uint32_t)));
+    theMenu[(int)0x0E].value = eeprom_read_dword((uint32_t *) (0x0E*sizeof(uint32_t)));
+    theMenu[(int)0x0F].value = eeprom_read_dword((uint32_t *) (0x0F*sizeof(uint32_t)));
+#endif
+
+#define inbetween(v, a, b) (!((v < a) || (v > b)))
+
+    SS_MuteLevel = (uint8_t) theMenu[MMUTELEVEL].value;
+    // integrity checking
+    if (!inbetween(SS_MuteLevel, 0, MAXMUTELEVEL))
+    {
+        SS_MuteLevel = INITIAL_MUTELEVEL;
+        theMenu[MMUTELEVEL].value = (uint32_t) SS_MuteLevel;
+        eeprom_write_dword((uint32_t *)(MMUTELEVEL*sizeof(uint32_t)), theMenu[MMUTELEVEL].value);
+    }
+
+    SS_FrequencyShift = theMenu[MSHIFT].value;
+    // integrity checking
+    if (!inbetween(SS_FrequencyShift, -60000L, 60000L))
+    {
+        SS_FrequencyShift = INITIAL_SHIFT;
+        theMenu[MSHIFT].value = SS_FrequencyShift;
+        eeprom_write_dword((uint32_t *)(MSHIFT*sizeof(uint32_t)), theMenu[MSHIFT].value);
+    }
+
+    SS_CtcssIndex = (uint8_t)theMenu[MCTCSS].value;
+    // integrity checking
+    if (!inbetween(SS_CtcssIndex,0,ctcssLength))
+    {
+        SS_CtcssIndex = 0;
+        eeprom_write_dword((uint32_t *)(MCTCSS*sizeof(uint32_t)), theMenu[MCTCSS].value);
+    }
+    theMenu[MCTCSS].value = (uint32_t)SS_CtcssIndex;
+    SS_CtcssFrequency     = (int16_t) CtcssTones[SS_CtcssIndex];
+
+    SS_ScanStartFrequency = theMenu[MSSTART].value;
+    // integrity checking
+    if (!inbetween(SS_ScanStartFrequency,BANDBOTTOM, BANDTOP))
+    {
+        SS_ScanStartFrequency = BANDBOTTOM;
+        theMenu[MSSTART].value = SS_ScanStartFrequency;
+        eeprom_write_dword((uint32_t *)(MSSTART*sizeof(uint32_t)), theMenu[MSSTART].value);
+    }
+
+    SS_ScanEndFrequency = theMenu[MSEND].value;
+    // integrity checking
+    if (!inbetween(SS_ScanEndFrequency,BANDBOTTOM, BANDTOP))
+    {
+        SS_ScanEndFrequency = BANDTOP;
+        theMenu[MSEND].value = SS_ScanEndFrequency;
+        eeprom_write_dword((uint32_t *)(MSEND*sizeof(uint32_t)), theMenu[MSEND].value);
+    }
+
+    SS_BaseFrequency = theMenu[5].value;
+    // integrity checking
+    if (!inbetween(SS_BaseFrequency,BANDBOTTOM, BANDTOP))
+    {
+        SS_BaseFrequency = INITIAL_FREQUENCY;
+        theMenu[5].value = SS_BaseFrequency;
+        eeprom_write_dword((uint32_t *)(5*sizeof(uint32_t)), theMenu[5].value);
+    }
+
+    SS_BaudrateIndex = theMenu[MABAUDRATE].value;
+    // integrity checking
+    if (!inbetween(SS_BaudrateIndex,0,baudrateLength))
+    {
+        SS_BaudrateIndex = 0;
+        theMenu[MABAUDRATE].value = (uint32_t)SS_BaudrateIndex;
+        eeprom_write_dword((uint32_t *)(MABAUDRATE*sizeof(uint32_t)), theMenu[MABAUDRATE].value);
+    }
+    SS_Baudrate = (uint32_t) Baudrates[SS_BaudrateIndex];
+
+    SS_RotaryType = theMenu[MAROTARYTYPE].value;
+    // integrity checking
+    if (!inbetween(SS_RotaryType,0,1))
+    {
+        SS_RotaryType = 0;
+        theMenu[MAROTARYTYPE].value = SS_RotaryType;
+        eeprom_write_dword((uint32_t *)(MAROTARYTYPE*sizeof(uint32_t)), theMenu[MAROTARYTYPE].value);
+    }
+     
+    SS_PllReferenceFrequency = theMenu[MAPLLREFMHZ].value;
+    // integrity checking
+    if (!inbetween(SS_PllReferenceFrequency, 5000UL, 150000UL))
+    {
+        theMenu[MAPLLREFMHZ].value = (uint32_t)INITIAL_REFERENCE;
+        theMenu[MAPLLREFKHZ].value = (uint32_t)INITIAL_REFERENCE;
+        eeprom_write_dword((uint32_t *)(MAPLLREFMHZ*sizeof(uint32_t)), theMenu[MAPLLREFMHZ].value);
+        eeprom_write_dword((uint32_t *)(MAPLLREFKHZ*sizeof(uint32_t)), theMenu[MAPLLREFKHZ].value);
+    }
 }
 
 // }}}
@@ -780,20 +918,41 @@ void initPORTS(void)
 
 void initialize(void)
 {
-    SS_BaseFrequency        = INITIAL_FREQUENCY;
+    // Some articles suggest you'd better wait a while until
+    // its very sure the 5v power line is stable
+    _delay_ms(100);
+
+    // We need to know about hardware config before hw init 
+#ifdef TESTING
+    initPersistentStorage();
+#endif
+    readPersistentStorage();
+
+    // These are actualy read from persistant storage
+    // SS_PllReferenceFrequency= INITIAL_REFERENCE;
+    // SS_FrequencyShift       = INITIAL_SHIFT;
+    // SS_ScanStartFrequency   = BANDBOTTOM;
+    // SS_ScanEndFrequency     = BANDTOP;
+    // SS_MuteLevel            = INITIAL_MUTELEVEL;
+    // SS_BaseFrequency        = INITIAL_FREQUENCY;
+
+    SS_DisplayFrequency     = SS_BaseFrequency;
     SS_VfoFrequency         = SS_BaseFrequency - IF;
-    SS_FrequencyShift       = INITIAL_SHIFT;
-    SS_ScanStartFrequency   = INITIAL_FREQUENCY;
-    SS_ScanEndFrequency     = BANDTOP;
-    SS_MuteLevel            = INITIAL_MUTELEVEL;
     SS_ShiftEnable          = FALSE;
     SS_ReverseShift         = FALSE;
     SS_Transmitting         = FALSE;
+    SS_MenuState            = MAINMENU;
+    SS_ValueEdit            = FALSE;
+    SS_Tuning               = TRUE;
+    IRQ_SelectorPushed      = FALSE;
+    IRQ_RotaryChange        = 0;
+    IRQ_Ticks               = 0;
 
 #ifdef TESTING
-    vInRotState = 9;
+    //    vInRotState = 9;
     GetcAvail   = FALSE;
     GetcBuffer  = 0;
+    PIND |= (1<<PTT); // PTT switch not active!
 #else
     initPORTS();
     initPLL();
@@ -818,7 +977,7 @@ void initialize(void)
 
 void ttySetCursorPosition(short row, short col)
 {
-    printf("\033[%d;%df",row+1, col+1);
+    if (!AutoTest) printf("\033[%d;%df",row+1, col+1);
 }
 
 // }}}
@@ -826,8 +985,11 @@ void ttySetCursorPosition(short row, short col)
 
 void ttyClearScreen(void)
 {
-    printf("\033[2J");
-    printf("\033[?1h");
+    if (!AutoTest)
+    {
+        printf("\033[2J");
+        printf("\033[?1h");
+    }
 }
 
 // }}}
@@ -835,16 +997,21 @@ void ttyClearScreen(void)
 // }}}
 // {{{ Display emulator
 
-// {{{ deSetCursorPosition
+void NL(void)
+{
+    printf("\n"); 
+    if (!AutoTest) printf ("\r");
+}
+
+// {{{ deSetCursorPosition(short row, short col)
 
 void deSetCursorPosition(short row, short col)
 {
-    cpos = row*DISPLAY_WIDTH + col;
     ttySetCursorPosition(row+YTop, col+XTop);
 }
 
 // }}}
-// {{{ deTop
+// {{{ deTop(void)
 
 void deTop(void)
 {
@@ -852,18 +1019,18 @@ void deTop(void)
 }
 
 // }}}
-// {{{ deData
+// {{{ deData(char c)
 
 void deData(char c)
 {
     printf("%c",c);
-    cpos++; 
-    if (cpos==DISPLAY_WIDTH)
-        deSetCursorPosition(2,1);
+    //cpos++; 
+    //if (cpos==DISPLAY_WIDTH)
+    //    deSetCursorPosition(2,1);
 }
 
 // }}}
-// {{{ deClearScreen
+// {{{ deClearScreen(void)
 
 void deClearScreen(void)
 {
@@ -881,17 +1048,18 @@ void deClearScreen(void)
 
     for (i=0; i<DISPLAY_WIDTH; i++)
     {
-        DisplayBuffer[0][i]=' ';
-        DisplayBuffer[1][i]=' ';
+        // DisplayBuffer[0][i]=' ';
+        // DisplayBuffer[1][i]=' ';
     }
 }
 
 // }}}
-// {{{ deCmd
+// {{{ deCmd(char c)
 
 void deCmd(char c)
 {
     short pos;
+    short row;
 
     if (c == dispCLEAR)
     {
@@ -905,13 +1073,14 @@ void deCmd(char c)
 
     if ((c & 0x80) == dispDDRA)
     {
-        pos = c & 0x7F;
-        deSetCursorPosition((pos/DISPLAY_WIDTH)+1 , (pos%DISPLAY_WIDTH)+1);
+        pos = c & 0x0F;
+        row = (c & 0x40) ? 1 : 0;
+        deSetCursorPosition(row,pos);
     }
 }
 
 // }}}
-// {{{ deFrame()
+// {{{ deFrame(void)
 
 void deLine(short w)
 {
@@ -919,27 +1088,30 @@ void deLine(short w)
     printf("+");
     for (i=1; i<w; i++)
         printf("-");
-    printf("+");
+    printf("+\n"); NL();
 }
 
 void deFrame(void)
 {
     short y;
 
-    // cursor off
-    printf("\033[?25l");   
-
-    deSetCursorPosition(-1, -1);
-    deLine(DE_WIDTH+1);
-    for (y=0; y<DE_HEIGHT; y++)
+    if (!AutoTest)
     {
-        deSetCursorPosition(y, -1);
-        printf("|");
-        deSetCursorPosition(y, DE_WIDTH);
-        printf("|");
+        // cursor off
+        printf("\033[?25l");   
+
+        deSetCursorPosition(-1, -1);
+        deLine(DISPLAY_WIDTH+1);
+        for (y=0; y<DISPLAY_HEIGHT; y++)
+        {
+            deSetCursorPosition(y, -1);
+            printf("|");
+            deSetCursorPosition(y,DISPLAY_WIDTH);
+            printf("|");
+        }
+        deSetCursorPosition(DISPLAY_HEIGHT, -1);
+        deLine(DISPLAY_WIDTH+1);
     }
-    deSetCursorPosition(DE_HEIGHT, -1);
-    deLine(DE_WIDTH+1);
 }
 
 // }}}
@@ -949,15 +1121,19 @@ void deFrame(void)
 
 char* yesno(short boolean)
 {
+    static char ayes[]="yes";
+    static char ano[] =" no";
     // green -> light gray
-    static char yes[]="\033[32myes\033[37m";
+    static char myes[]="\033[32myes\033[37m";
     // red -> light gray
-    static char no[] ="\033[31m no\033[37m";
-    return (boolean ? yes : no); 
+    static char mno[] ="\033[31m no\033[37m";
+    if (AutoTest)
+        return (boolean ? ayes : ano); 
+    else
+        return (boolean ? myes : mno); 
 }
 
 // }}}
-
 
 // }}}
 // {{{ Input Scaffolding
@@ -1040,59 +1216,73 @@ void FHEungetc(char c)
 #endif
 
 // }}}
-// {{{ input functions
+
+// {{{ Input functions
+
+// {{{ int8_t InputRotaryPoller(void) (Full cycle per click)
+
+int8_t InputRotaryPoller(void)
+{
+    unsigned char sample;
+    unsigned char data;
+    unsigned char clk;
+    unsigned char UpDown;
+
+    // read input lines
+    sample = PIND;
+
+    // isolate the signals
+    data = (sample & ALINEMASK) != 0;
+    clk  = (sample & BLINEMASK) != 0;
+
+    if (clk && !GClkPrev)   // true on rising flank 
+    {                    
+        UpDown = data;      // sample data signal
+        if (UpDown)
+            IRQ_RotaryChange++;
+        else
+            IRQ_RotaryChange--; 
+    }
+    GClkPrev = clk;         // save for next iteration
+
+    return IRQ_RotaryChange;
+}
+
+// }}}
+// {{{ char InputGetPTT(void)
+
+char InputGetPTT(void)
+{
+    static char prevPttActive;
+    char pttActive;
+    char rv;
 
 #ifdef TESTING
-// {{{ short bounce()
-
-#define bounceCLK   1
-#define bounceDATA  2
-
-short bounce(short clock, short data, short bounceSelect, short newState)
-{
-    short rv; // return value
-
-    static short bounceCount;
-
-    // bounce during the first 4 cycles
-    // keep stable in the last 4 cycles
-
-    if (bounceSelect == bounceCLK)
-    {
-        // clock bounces : on odd bounceCount values, return inverted clock value
-        rv =  (bounceCount & 0x01) ?  clock | data : (clock ^ ALINEMASK) | (data);
-        //                            unchanged    one's complement   unchanged
-    } else // bounceDATA
-    {
-        // data bounces : on odd bounceCount values, return inverted data value
-        rv =  (bounceCount & 0x01) ?  clock | data : (clock) | (data ^ BLINEMASK);
-        //                            unchanged     unchanged   one's  complement
-    }
-
-    // after 4 times stop bouncing and return the true values
-    //if (bounceCount > 4)
-    rv = (clock | data);
-
-    // rv = rv & 3; 
-    // S = rv;
-
-    // rotate through 8 cycles
-    bounceCount++;
-    //if (bounceCount > 8) 
-    {
-        bounceCount=0;
-        vInRotState = newState;
-    }
-#ifdef DBG_LOGGING
-    fprintf(dbg,"%02x ",rv);
+    char ppa = prevPttActive;
 #endif
+
+    // sample value from PTT switch input
+    pttActive = ((PIND & (1<<PTT)) == 0);
+    if (prevPttActive != pttActive)
+    {
+        prevPttActive = pttActive;
+        // if PTT activated return 1
+        // if PTT released return  2
+        // return 0 on no-change
+        rv = (pttActive) ? 1 : 2;
+    } else
+        rv = 0;
+#ifdef TESTING    
+    if (dbg_logging) 
+        fprintf(dbg, "PIND=%02x prevPTT=%02x, PTT=%02x rv=%d \n", PIND, ppa, pttActive, rv);
+#endif
+
+    //test and debug $$$
+    rv = (pttActive) ? 1 : 2;
     return rv;
 }
 
 // }}}
-#endif
-
-// feb 2016
 // {{{ int  InputGetRotaryDialCount(void)
 
 int InputGetRotaryDialCount(void)
@@ -1104,8 +1294,8 @@ int InputGetRotaryDialCount(void)
 
     ATOMIC_BLOCK(ATOMIC_FORCEON)
     {
-        rv = SS_RotaryChange;
-        SS_RotaryChange = 0;
+        rv = IRQ_RotaryChange;
+        IRQ_RotaryChange = 0;
     }
     return rv;
 #endif
@@ -1123,7 +1313,8 @@ char InputGetSelectorPushed(void)
 
     ATOMIC_BLOCK(ATOMIC_FORCEON)
     {
-        rv = SS_SelectorPushed;
+        rv = IRQ_SelectorPushed;
+        IRQ_SelectorPushed = FALSE;
     }
     return rv;
 #endif
@@ -1133,472 +1324,628 @@ char InputGetSelectorPushed(void)
 // {{{ char InputGetShiftEnable(void)
 char InputGetShiftEnable(void)
 {
-#ifdef TESTING
-    return FALSE;
-#else
-    register char ioreg;
-    // sample value from PTT switch input
-    ioreg = PIND;
-    // write boolean to system-state
-    return (0 != (ioreg & (1<<SHIFTKEY)));
+    static char prevShiftActive;
+    char shiftActive;
+    char rv;
+
+    // sample value from shift switch input
+    shiftActive = ((PIND & (1<<SHIFTKEY)) == 0);
+    if (prevShiftActive != shiftActive)
+    {
+        prevShiftActive = shiftActive;
+        // if Shift activated return 1
+        // if Shift released return -1
+        // return 0 on no-change
+        rv = (shiftActive) ? 1 : -1;
+    } else
+        rv = 0;
+
+#ifdef TESTING 
+    rv = FALSE;
 #endif
+    return rv;
 }
 
 // }}}
-// {{{ char InputGetPTT(void)
+// {{{ short InputGetSMeter(void)
 
-char InputGetPTT(void)
+uint16_t InputGetSMeter(void)
 {
 #ifdef TESTING
-    return FALSE;
-#else
-    register char ioreg;
-    // sample value from PTT switch input
-    ioreg = PIND;
-    // write boolean to system-state
-    return (0 != (ioreg & (1<<PTT)));
-#endif
-}
+    static int simuls;
+    static int delay;
+    static char rising;
+    static int hoog=980;
+    static int laag=980-84;
 
-// }}}
-// {{{ char InputGetSMeter(void)
-
-char InputGetSMeter(void)
-{
-#ifdef TESTING
-    return 0;
+    if (SS_Tuning && (delay++ > 320))
+    {
+        delay = 0;
+        if (rising) simuls++; else simuls--;
+        if (simuls>hoog) { simuls=hoog; rising=FALSE; }
+        if (simuls<laag) { simuls=laag; rising=TRUE; }
+    }
+    return simuls;
 #else
+    // set AD Start Conversion bit and AD ENable bit
     ADCSRA |= (1<<ADSC)|(1<<ADEN); 
+
+    // wait for conversion to finish
+    // this is indicated by the ADSC bit clear
     while ((ADCSRA & (1<<ADSC))!=0);
+
+    // apparantly ADC is a 16 bit register
     return ADC;
 #endif
 }
 
 // }}}
-// /feb 2016
 
-// {{{ obsolete
-/*
-// {{{ void getInputRotary(void)
+// {{{  void InputHandler(void)
 
-void getInputRotary(void)
+char InputHandler(void)
 {
-char clk;
-char data;
-char sample;
-char UpDown=0;
+    char busy = TRUE;
+    if (SS_RotaryType != 1) InputRotaryPoller();
+
+    SS_RotaryCount = InputGetRotaryDialCount();
+    SS_Selected    = InputGetSelectorPushed();
+    SS_ShiftChange = InputGetShiftEnable();
+    SS_PTT         = InputGetPTT();
+    SS_SMeterIn    = InputGetSMeter();
 
 #ifdef TESTING
-// =========================
-static char input;
-char c;
-if ((c = FHEgetc()))
-{
-switch (c)
-{
-case ']' :
-vInRotState = 0;
-break;
+    // {{{ read keyboard for test
 
-case '[' :
-vInRotState = 4;
-break;
+    // clear now, set to TRUE and process when 'e' key is pressed
+    SS_Selected = FALSE;
 
-default :
-FHEungetc(c);
-}
-}
-
-#ifdef DBG_LOGGING
-fprintf(dbg," vir-%02x, ch-%02x ",vInRotState, c);
-#endif
-switch (vInRotState)
-{
-// up rotation
-case 0 :
-input = bounce(CLKMASK, 0,        bounceDATA, 1);
-break;
-
-case 1 :
-input = bounce(0,       0,        bounceCLK , 2);
-break;
-
-case 2 :
-input = bounce(0,       DATAMASK, bounceDATA, 3);
-break;
-
-case 3 :
-input = bounce(CLKMASK, DATAMASK, bounceCLK , 9);
-break;
-
-// down rotation
-case 4 :
-input = bounce(CLKMASK, DATAMASK, bounceDATA, 5) ;
-break;
-
-case 5 :
-input = bounce(0,       DATAMASK, bounceCLK , 6);
-break;
-
-case 6 :
-input = bounce(0,       0,        bounceDATA, 7);
-break;
-
-case 7 :
-input = bounce(CLKMASK, 0,        bounceCLK , 9);
-break;
-
-case 9 :
-vInRotState = 9;
-break;
-}
-
-#ifdef DBG_LOGGING
-fprintf(dbg, "i-%02x ",input);
-#endif
-// 
-// -+   +---+   +---+
-//  +---+   +---+   +---   Data
-//
-//    |   |   |   |   |     
-//
-// ---+   +---+   +---+
-//    +---+   +---+   +-   Clock
-//   0 1 2 3 4 5 6 7 8 9
-// =========================
-#endif
-//                        +----------------------> rising edge -> frequency step
-//                        |
-//         double         |           positive
-//      edge triggerd     |        edge triggered
-//        +-------+       |           +-------+
-// DATA---| D   Q |--(Qd)-+     DATA--| D   Q |--> UpDown
-// CLK-+--|>      |         +---------|>      |
-//     |  |    /Q |         |         |    /Q |
-//     |  +-------+         |         +-------+
-//     +--------------------+
-//
-// Given a 90 degrees out of phase DATA and CLOCK signal that both
-// have bounce during the level change, Qd will be a cleaned up clock signal.
-// Using this cleaned up CLOCK (Qd), a single frequency step per cycle can be guaranteed, 
-// regardless of bouncing contacts.
-// Using the rising edge of CLOCK to sample the DATA in its stable periods will 
-// provide a clean UpDown signal.
-// On the rising Qd edge, the UpDown signal differentiates between rotate up and rotate down
-
-#ifdef TESTING
-sample = input;
-#else
-// read the port D input values  
-sample = PIND;
-#endif
-
-// isolate clock and data signals 
-clk  = (sample & CLKMASK ) == 0;
-data = (sample & DATAMASK) == 0;
-
-#ifdef DBG_LOGGING
-fprintf(dbg,"c-%02x d-%02x ",clk,data);
-#endif
-// Double edge triggered D-flipflop creates 
-// clean clock pulses output on Qd
-
-// Any clock change will do
-// Qd will be used to guarantee single freq 
-// steps dispute bounce 
-if (clk != GClkPrev) 
-{
-    // sample the data signal 
-    GQd = data;      
-}
-
-#ifdef DBG_LOGGING
-fprintf(dbg,"qd-%02x ",GQd);
-#endif
-
-// Positive edge triggered D-flipflop 
-// creates  a directional value  (UpDown)
-
-// Trigger only on rising edge (CLK) 
-if (clk && !GClkPrev) 
-{                    
-    // The data signal is stable at this moment 
-    UpDown = data;
-}
-
-// Trigger only on clean clock (Qd) going high. 
-if (GQd & !GQdPrev)  
-{                    
-    inputStateRotary = (UpDown) ? UPEVENT : DOWNEVENT;
-}
-
-
-#ifdef DBG_LOGGING
-fprintf(dbg,"ud-%02x isr-%02x ",UpDown, inputStateRotary);
-#endif
-
-GClkPrev = clk;
-GQdPrev  = GQd;
-
-// $$$ FHE DEBUG
-if (GQd) 
-    sbi(PORTB,PB2);
-    else
-    cbi(PORTB,PB2);
-    // $$$ FHE /DEBUG
-
-    }
-
-// }}}
-// {{{ void getInputSelector(void)
-
-void getInputSelector(void)
-{
-#ifdef TESTING
-    // {{{ testing
+    char theKey;
     char c;
     if ((c = FHEgetc()))
     {
+        // save the key for debug purposes
+        theKey = c;
+
         switch (c)
         {
-            case 'e'  :
-            case 0x0D  :
-                inputStateSelector = SELECTEVENT;
-                break;
+            case 27  : // 27 is the ESCAPE character
+            case 'q' : busy = FALSE;
+                       theKey = c;
+                       break;
 
-            default :
-                FHEungetc(c);
+            case '[' : SS_RotaryCount = -1;
+                       theKey = c;
+                       break;
+
+            case ']' : SS_RotaryCount = +1;
+                       theKey = c;
+                       break;
+
+                       // Clear the PTT bit (switch pulls to ground)
+            case 't' : PIND &= ~(1<<PTT);
+                       theKey = c;
+                       break;
+
+                       // Set the PTT bit (switch released, pull-up active)
+            case 'r' : PIND |= (1<<PTT);
+                       theKey = c;
+                       break;
+
+            case 's' : SS_ShiftChange = 1;
+                       theKey = c;
+                       break;
+
+            case 'a' : SS_ShiftChange = 2;
+                       theKey = c;
+                       break;
+
+            case 'e' : SS_Selected = TRUE;
+                       theKey = c;
+                       break;
+
+            default:
+                       // swallow unused input characters by 
+                       // calling the non-blocking FHEgetc();
+                       (void)FHEgetc();
         }
     }
-    // }}}
-#else
 
-#if FALSE
-    // {{{ obsolete example
-    // rotary button pushed?
-    if (!(PIND & (1<<ROTKEY))) 
+    // }}}
+#endif
+
+    return busy;
+}
+// }}} input handling
+
+// }}}
+// {{{ void RemoteControlHandler(void)
+
+void RemoteControlHandler(void)
+{
+}
+
+// }}}
+// {{{ void ProcessingHandler(void)
+
+void ProcessingHandler(void)
+{
+    // {{{ // Rotary Handling
+
+    // {{{ Tuning
+
+    // Tuning is only allowed during receive
+    if ((!SS_Transmitting) & SS_Tuning)
     {
-        for (c=0;;c++) 
+        if (SS_RotaryCount != 0)
         {
-            _delay_ms(200);// $$$ FHE TODO bounce suppressor (get rid of this) 
-            // wait for button released
-            if ((PIND & (1<<ROTKEY))) 
+            SS_BaseFrequency += SS_RotaryCount * CHANNELSTEP;
+            SS_RotaryCount = 0;
+            lastFrequencyChange = IRQ_Ticks;
+#ifdef TESTING
+            tmpFreqChanged = TRUE;
+            tmpFreqSaved  = FALSE;
+            lastFrequencyChange = clock();
+#endif
+        }
+    } 
+#ifdef TESTING
+    now = clock();
+    if ((now - lastFrequencyChange) > 1000000L) // 1 mil usecs ~ 2 sec
+    {
+        theMenu[5].value = SS_BaseFrequency;
+        // position 5 is not used for regular value storage
+        // eeprom_write_dword(5, theMenu[5].value);
+        tmpFreqChanged = FALSE;
+        tmpFreqSaved = TRUE;
+    }
+#else
+    currentTime = IRQ_Ticks;
+    if ((currentTime - lastFrequencyChange) > 200) //  ~ 2 sec
+    {
+        theMenu[5].value = SS_BaseFrequency;
+        // position 5 is not used for regular value storage
+        eeprom_update_dword((uint32_t *)(5*sizeof(uint32_t)), theMenu[5].value);
+    }
+#endif
+
+    // }}}
+    // {{{ Menu scrolling
+
+    int8_t start;
+    int8_t length;
+    int8_t level;
+    int8_t tmp;
+    uint32_t kHz;
+
+    // scrolling through menu
+    if (!SS_Tuning && !SS_ValueEdit)
+    {
+        if (SS_RotaryCount != 0)
+        { 
+            level  = theMenu[SS_MenuState].level;
+            start  = infoMenu[level].start;
+            length = infoMenu[level].length;
+
+            // f(x) = (( x – start + Nsteps ) % length ) + start
+            tmp = SS_MenuState - start + SS_RotaryCount;
+            SS_MenuState = tmp % length;
+            if (SS_MenuState < 0) 
+                SS_MenuState += length; // necesary because the % operator may return negative results
+            SS_MenuState += start;
+            SS_RotaryCount = 0;
+        }
+    }
+
+    // editing values
+    if (!SS_Tuning && SS_ValueEdit)
+    {
+        if (SS_RotaryCount != 0)
+        { 
+            switch (SS_MenuState)
             {
-                _delay_ms(200);// $$$ FHE TODO delay loop (get rid of this)
-                break;
+                case MMUTELEVEL :
+                    SS_MuteLevel+= SS_RotaryCount;
+                    if (SS_MuteLevel > MAXMUTELEVEL) SS_MuteLevel = MAXMUTELEVEL;
+                    if (SS_MuteLevel < 0)            SS_MuteLevel = 0;
+                    theMenu[SS_MenuState].value    = SS_MuteLevel;
+                    break;
+
+                case MSHIFT :
+                    SS_FrequencyShift += (SS_RotaryCount*1000);
+                    if (SS_FrequencyShift > MAXSHIFT) SS_FrequencyShift = MAXSHIFT;
+                    if (SS_FrequencyShift < MINSHIFT) SS_FrequencyShift = MINSHIFT;
+                    theMenu[SS_MenuState].value     = SS_FrequencyShift;                
+                    break;
+
+                case MCTCSS :
+                    SS_CtcssIndex += SS_RotaryCount;
+                    if (SS_CtcssIndex < 0) SS_CtcssIndex = 0;
+                    if (SS_CtcssIndex > ctcssLength) SS_CtcssIndex = ctcssLength;
+
+                    theMenu[SS_MenuState].value = (int32_t)SS_CtcssIndex;
+                    SS_CtcssFrequency = CtcssTones[SS_CtcssIndex];
+                    break;
+
+                case MSSTART :
+                    SS_ScanStartFrequency += (SS_RotaryCount * CHANNELSTEP);
+                    if (SS_ScanStartFrequency < BANDBOTTOM) SS_ScanStartFrequency = BANDBOTTOM;
+                    if (SS_ScanStartFrequency > SS_ScanEndFrequency) SS_ScanStartFrequency = SS_ScanEndFrequency;
+                    theMenu[SS_MenuState].value = SS_ScanStartFrequency;
+                    break;
+
+                case MSEND :
+                    SS_ScanEndFrequency += (SS_RotaryCount * CHANNELSTEP);
+                    if (SS_ScanEndFrequency < SS_ScanStartFrequency) SS_ScanEndFrequency = SS_ScanStartFrequency;
+                    if (SS_ScanEndFrequency > BANDTOP)    SS_ScanEndFrequency = BANDTOP;
+                    theMenu[SS_MenuState].value = SS_ScanEndFrequency;
+                    break;
+
+                case MARETURNMODE :
+                    SS_RotaryCount = SS_RotaryCount % 2;
+                    SS_DirectMenuReturn = (SS_RotaryCount==1) ? TRUE : FALSE;
+                    theMenu[SS_MenuState].value = SS_DirectMenuReturn;
+                    break;
+                    /*
+                       case MASMCALIB :
+                       SS_SMeterCalib += SS_RotaryCount;
+                       break;
+                     */
+                    // ADF4113HV   Fref = 5 .. 150 MHz
+                case MAPLLREFMHZ :
+                    SS_PllReferenceFrequency += SS_RotaryCount * 1000;
+                    if (SS_PllReferenceFrequency <   5000UL) SS_PllReferenceFrequency =   5000UL;
+                    if (SS_PllReferenceFrequency > 150000UL) SS_PllReferenceFrequency = 150000UL;
+                    theMenu[SS_MenuState  ].value = SS_PllReferenceFrequency;
+                    theMenu[SS_MenuState+1].value = SS_PllReferenceFrequency;
+                    break;
+
+                case MAPLLREFKHZ :
+                    kHz = SS_PllReferenceFrequency;
+                    kHz += SS_RotaryCount;
+                    kHz = kHz % 1000;                   // Stay in the kHz range
+                    SS_PllReferenceFrequency /= 1000;   // Integer devide by 1000, followed by...
+                    SS_PllReferenceFrequency *= 1000;   // multiply by 1000 to set the lower 3 digits to 0
+                    SS_PllReferenceFrequency += kHz;    // Now add in the kHz value.
+                    theMenu[SS_MenuState  ].value = SS_PllReferenceFrequency;
+                    theMenu[SS_MenuState-1].value = SS_PllReferenceFrequency;
+                    break;
+
+                case MABAUDRATE :
+                    SS_BaudrateIndex += SS_RotaryCount;
+                    if (SS_BaudrateIndex < 0) SS_BaudrateIndex = 0;
+                    if (SS_BaudrateIndex > baudrateLength) SS_BaudrateIndex = baudrateLength;
+
+                    theMenu[SS_MenuState].value = (int32_t)SS_BaudrateIndex;
+                    SS_Baudrate = Baudrates[SS_BaudrateIndex];
+                    break;
+
+                case MAROTARYTYPE :
+                    SS_RotaryType += SS_RotaryCount;
+                    if (SS_RotaryType < 0) SS_RotaryType = 0;
+                    if (SS_RotaryType > 1) SS_RotaryType = 1;
+                    theMenu[SS_MenuState].value = (int32_t)SS_RotaryType;
+                    break;
+
+                case MAREMOTEENABLE:
+                    SS_RotaryCount = SS_RotaryCount % 2;
+                    SS_RemoteEnable = (SS_RotaryCount==1) ? TRUE : FALSE;
+                    theMenu[SS_MenuState].value = SS_RemoteEnable;
+                    break;
+
+                case MAFRONTENABLE :
+                    SS_RotaryCount = SS_RotaryCount % 2;
+                    SS_FrontEnable = (SS_RotaryCount==1) ? TRUE : FALSE;
+                    theMenu[SS_MenuState].value = SS_FrontEnable;
+                    break;
             }
-        }
-        if (c>5)
-            inputStateSelector = LARGEEVENT;
-        else
-            inputStateSelector = SELECTEVENT;
+            // swallow the rotary pulses used
+            SS_RotaryCount = 0;
+        } 
     }
-    // }}}
-#endif
 
-    // {{{ new selector code
-    if (!(PIND & (1<<ROTKEY))) 
+    // }}}
+
+    // }}}
+    // {{{ // Selector Button
+
+    // {{{ Select pushed during tuning
+
+    if (SS_Selected && SS_Tuning && !SS_Transmitting)
     {
-        // run this if selector is pressed    
-        switch (inputStateSelector)
+        SS_Selected = FALSE;            // swallow the selection action
+
+        // handle the selector button pushed
+        SS_Selected = FALSE;        // swallow the selection action
+        SS_MenuState = MAINMENU;    // always start here
+        SS_Tuning   = FALSE;        // rotary input now goes to menu
+        SS_Scanning = FALSE;        // stop scanning on entering menu
+        SS_ValueEdit= FALSE;
+    }
+
+    // }}}
+    // {{{ Select pushed during Menu browing 
+
+    if (SS_Selected && !SS_Tuning && !SS_ValueEdit) 
+    {
+        // here we are already in menu handling mode
+        SS_Selected = FALSE;        // swallow the selection action
+        switch (SS_MenuState)
+        {
+            case MBACK2TUNE :
+                SS_Tuning = TRUE;   // switch to tuning mode
+                prevFreq = 0L;      // force update of freq dispaly
+                break;
+
+            case MABACK2MAIN :
+                SS_MenuState = MAINMENU;
+                break;
+
+            case MSCAN :
+                SS_Tuning = TRUE;   // switch to tuning mode
+                SS_Scanning = TRUE; // and go to scanning mode
+                prevFreq = 0L;      // force update of freq display
+                break;
+
+            case MSETTINGS :        // Goto the first submenu
+                SS_MenuState = SUBMENU1;
+                break;
+
+            default :  
+                SS_ValueEdit = TRUE;
+        }
+    }
+
+    // }}}
+    // {{{  Select pushed during Value editing
+
+    if (SS_Selected && !SS_Tuning && SS_ValueEdit) 
+    {
+        SS_Selected = FALSE;        // swallow the selection action
+
+        // here we are already in menu handling mode AND editing values
+        if (!SS_Tuning && SS_ValueEdit) 
+        {
+            SS_ValueEdit = FALSE;   // return from value editing
+            SS_Tuning = SS_DirectMenuReturn;
+            prevFreq = 0L;          // force update of freq display
+            // and write value to persistent memory
+            // need to write proper persistent storage routine for that
+        }
+        switch (SS_MenuState)
+        {
+            case MMUTELEVEL :
+                SS_MuteLevel = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MMUTELEVEL*sizeof(uint32_t)),theMenu[MMUTELEVEL].value);
+                break;
+
+            case MSHIFT :
+                SS_FrequencyShift = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MSHIFT*sizeof(uint32_t)) ,theMenu[MSHIFT].value);
+                break;
+
+            case MCTCSS:
+                SS_CtcssIndex = theMenu[SS_MenuState].value;
+                SS_CtcssFrequency = CtcssTones[SS_CtcssIndex];
+                TimerValue = 5*F_CPU/SS_CtcssFrequency; // *10/2
+                eeprom_write_dword((uint32_t *)(MCTCSS*sizeof(uint32_t)),theMenu[MCTCSS].value);
+                break;
+
+            case MSSTART :
+                SS_ScanStartFrequency = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MSSTART*sizeof(uint32_t)) ,theMenu[MSSTART].value);
+                break;
+
+            case MSEND :
+                SS_ScanEndFrequency= theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MSEND*sizeof(uint32_t)) ,theMenu[MSEND].value);
+                break;
+
+            case MABAUDRATE :
+                SS_BaudrateIndex = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MABAUDRATE*sizeof(uint32_t)) ,theMenu[MABAUDRATE ].value);
+                break;
+
+            case MAROTARYTYPE :
+                SS_RotaryType = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MAROTARYTYPE*sizeof(uint32_t)) ,theMenu[MAROTARYTYPE].value);
+                // reset the rotary input system
+                break;
+
+            case MAFRONTENABLE :
+                SS_FrontEnable = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MAFRONTENABLE*sizeof(uint32_t)),theMenu[MAFRONTENABLE].value);
+                break;
+
+            case MAREMOTEENABLE :
+                SS_RemoteEnable = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MAREMOTEENABLE*sizeof(uint32_t)),theMenu[MAREMOTEENABLE].value);
+                break;
+        }
+    }
+
+    // }}}
+
+    // }}} end selector button
+
+    // {{{ // Push To Talk
+
+    switch (SS_PTT)
+    {
+        // activated
+        case 1  :
+            SS_Transmitting = TRUE;
+            // if we are scanning, then stop now!
+            SS_Scanning = FALSE;
+            break;
+
+            // released
+        case 2  :
+            SS_Transmitting = FALSE;
+            break;
+    }
+
+    SS_TxRxIndicator = (SS_Transmitting) ? 'T' : 'R';
+
+    // }}}
+    // {{{ // Shift Enable
+
+    switch (SS_ShiftChange)
+    {
+        // activated
+        case 1  :
+            SS_ShiftEnable = TRUE;
+            break;
+
+            // released
+        case 2  :
+            SS_ShiftEnable = FALSE;
+            break;
+    }
+
+
+    // }}}
+    // {{{ // SMeter and Squelch 
+
+    if (!SS_Transmitting)
+    {
+        //SS_DisplaySMeter = ((1024-SS_SMeterIn) - 44) >> 1;
+        SS_DisplaySMeter = (980 - SS_SMeterIn) >> 1;
+
+        // low pass s-meter signal
+        SS_DisplaySMeter += LowPass;
+        SS_DisplaySMeter >>= 1;
+        LowPass = SS_DisplaySMeter;
+
+        SS_Muted = (SS_MuteLevel > SS_DisplaySMeter);
+    } else {
+        SS_Muted = TRUE;
+    }
+    SS_MuteIndicator = (SS_Muted) ? 'M' : ' ';
+
+    // }}}
+    // {{{ // Scanner
+#ifdef TESTING
+    // stop scanning when found a busy channel
+    if (!SS_Muted) SS_Scanning = FALSE;
+
+    if (SS_Scanning)
+    {   
+        uint16_t StepDelay=125;
+        clock_t now = clock();
+        currentTime = (float)now * 1000.0F / CLOCKS_PER_SEC;
+        goStep = (currentTime - prevStepTime) > StepDelay;
+        if (goStep)
         {   
-            // this is a new push event
-            case IDLE : 
-                // signal selector pushed to the proces state machine
-                inputStateSelector  = SELECTEVENT;
-                // setup the bounce delay
-                inputSelectDebounce = SELECTBOUNCEDELAY;
-                break;
-
-                // after the first push, we may bounce for some amount of cycles
-            case SELECTEVENT : 
-                inputStateSelector  = SELECTBOUNCING;
-                break; 
-
-                // decrease bounce delay unil bounce time passed
-            case SELECTBOUNCING : 
-                inputSelectDebounce--;
-                inputStateSelector  = (inputSelectDebounce==0) ? SELECTWAITRELEASE : SELECTBOUNCING; 
-                break; 
-
-                // now we need to wait until the select button has been relased again.
-                // the next "else" statement will bring us to the IDLE state
-            case SELECTWAITRELEASE : 
-                break;
-
-                // any other state on selector pushed is illegal, 
-                // so return to idle state
-            default :
-                inputStateSelector = IDLE;
-
+            prevStepTime = currentTime;
+            SS_BaseFrequency =
+                (SS_BaseFrequency > SS_ScanEndFrequency) ? SS_ScanStartFrequency : SS_BaseFrequency+CHANNELSTEP;
         }
-    }  else 
-        // arrive here when selector not pressed (anymore)
-    {
-        // if we are waiting for release
-        if (inputStateSelector == SELECTWAITRELEASE)
-        {
-            // then set state to idle
-            inputStateSelector = IDLE; 
-        }
-    }
+    }   
+#else
+    // $$$ FHE TODO
+#endif
     // }}}
-#endif
+    // {{{ // Frequency Calculations
+    int32_t offset;
+
+    SS_VfoFrequency     = SS_BaseFrequency - ((SS_Transmitting) ? 0L : IF);
+    SS_DisplayFrequency = SS_BaseFrequency;
+
+    //                shift  AND (ptt            XOR  reversShift)
+    offset = (SS_ShiftEnable && (SS_Transmitting != SS_ReverseShift)) ? SS_FrequencyShift : 0L;
+    SS_VfoFrequency     += offset;
+    SS_DisplayFrequency += offset;
+
+    // }}}
+
 }
 
-// }}}
-// {{{ void getInputTxRx(void)
+// }}} Processing
+// {{{ Output functions
 
-void getInputTxRx(void)
+// {{{ void OutputSetAudioMute(char mute)
+
+#define MUTEINDICATOR 'M'
+#define BLANK         ' '
+
+void OutputSetAudioMute(char mute)
 {
-#ifdef TESTING
-    char c;
+    // boolean mute;
+    static char prevMute;
 
-    if ((c = FHEgetc()))
+    if (prevMute != mute)
     {
-        switch (c)
+        prevMute = mute;
+        if (mute) 
         {
-            case 't' :
-                inputStatePTT = TXEVENT;
-                break;
-
-            case 'r' :
-                inputStatePTT = RXEVENT;
-                break;
-
-            default :
-                FHEungetc(c);
+            sbi(PORTC, MUTE);
+        } else {
+            cbi(PORTC, MUTE);
         }
     }
-#else
-
-    char sw;
-    sw = PIND;
-    if (Transmitting && (sw & (1<<PTT)))
-        inputStatePTT = RXEVENT;
-
-    if (!Transmitting && !(sw & (1<<PTT)))
-        inputStatePTT = TXEVENT;
-
-#endif
 }
 
+
 // }}}
-// {{{ void getInputShift(void)
+// {{{ void OutputSetVfoFrequency(int32_t vfoFreq)
 
-void getInputShift(void)
+void OutputSetVfoFrequency(int32_t vfoFreq)
 {
-#ifdef TESTING
-    char c;
+    static int32_t prevVfo;
+    int32_t reg, frast;
+    int32_t fRasterHigh, fRasterLow;
 
-    if ((c = FHEgetc()))
+    if (prevVfo != vfoFreq)
     {
-        switch (c)
-        {
-            case 'a'  :
-                inputStateShift = SHIFTOFFEVENT;
-                break;
+        prevVfo = vfoFreq;
+        frast = vfoFreq / CHANNELSTEP;
+        fRasterHigh = frast/16;
+        fRasterLow  = frast%16;
 
-            case 's'  :
-                inputStateShift = SHIFTONEVENT;
-                break;
-
-            default :
-                FHEungetc(c);
-        }
+        reg = ((fRasterHigh & 0x1fff)<<8) + ((fRasterLow & 0x3f)<<2) + 1;
+        OutputSetPLL(reg);
     }
-#else
-    char sw;
-    sw = PIND;
-
-    // switch shift off
-    if (ShiftEnable && (sw & (1<<SHIFTKEY) )) 
-        inputStateShift = SHIFTOFFEVENT;
-
-    // switch shift on
-    if (!ShiftEnable && !(sw & (1<<SHIFTKEY) )) 
-        inputStateShift = SHIFTONEVENT;
-
-#endif
 }
 
 // }}}
-// {{{ void getInputSMeter(void)
+// {{{ void OutputSetPLLReference(int32_t reference)
 
-void getInputSMeter(void)
+void OutputSetPLLReference(int32_t reference)
+{   
+    int32_t reg;
+    // init R-counter
+    reg = (2UL<<16) + ((SS_PllReferenceFrequency/CHANNELSTEP)<<2);
+    OutputSetPLL(reg);
+}
+
+// }}}
+// {{{ void OutputSetPLL(int32_t r)
+
+void OutputSetPLL(int32_t r)
 {
-#ifdef TESTING
-    LoopCounter++;
-    if ((LoopCounter%2000) == 0)
-    {
-        if (inputStateSMeter>26) goingUp = FALSE;
-        if (inputStateSMeter<1 ) goingUp = TRUE;
+    char i;
 
-        if (goingUp)
-            inputStateSMeter++;
+    for (i=0; i<24; i++) 
+    {
+        if (r & 0x800000)
+            sbi(PORTC, ADATA);
         else
-            inputStateSMeter--;
+            cbi(PORTC, ADATA);
+
+        // output the int32_t word via bit banging
+        _delay_us(1);
+        sbi(PORTC, ACLK);
+        _delay_us(1);
+        cbi(PORTC, ACLK);
+        r <<= 1;
     }
-#else
-    register short s;
 
-    ADCSRA |= (1<<ADSC)|(1<<ADEN); 
-    while ((ADCSRA & (1<<ADSC))!=0);
-
-    // calculate Smeter
-    s = (1024-ADC)-44;
-
-    // low pass s-meter signal
-    s += LowPass;
-    s >>= 1;
-    LowPass= s;
-
-    inputStateSMeter = s;
-#endif
-}
-
-// }}}
-// {{{ void getInputLargeStep(void)
-#ifdef TESTING
-
-void getInputLargeStep(void)
-{
-    char c;
-
-    if ((c = FHEgetc()))
-    {
-        switch (c)
-        {
-            case 'l'  :
-                inputStateLargeStep= LARGEEVENT;
-                break;
-
-            default :
-                FHEungetc(c);
-        }
-    }
-}
-
-#endif
-// }}}
-*/
-// }}}
-
-// }}}
-// {{{ output functions
-
-// feb2016
-// {{{ void OutputSetVfoFrequency(long int divider)
-
-void OutputSetVfoFrequency(long int divider)
-{
-}
-
-// }}}
-// {{{ void OutputSetPLLReference(long int reference)
-
-void OutputSetPLLReference(long int reference)
-{
+    // activate the latch
+    _delay_us(1);
+    sbi(PORTC, ALE);
+    _delay_us(1);
+    cbi(PORTC, ALE);
 }
 
 // }}}
@@ -1606,55 +1953,220 @@ void OutputSetPLLReference(long int reference)
 
 void OutputSetCtcssFreq(int ctcssFreq)
 {
+    TimerValue = 5*F_CPU/SS_CtcssFrequency; // *10/2
 }
 
 // }}}
 // {{{ void OutputSetTransmitterOn(char value)
 
-void OutputSetTransmitterOn(char value)
+void OutputSetTransmitterOn(char tx)
 {
+    if (tx)
+    {
+        sbi(PORTC, TXON);
+        sbi(PORTC, MUTE);
+        // mute audio amp during transmit;
+        OutputSetAudioMute(tx);
+    }
+    else
+    {    
+        cbi(PORTC, TXON);
+    }
 }
 
 // }}}
-// {{{ void OutputSetAudioMute(char mute)
+// {{{ void OutputSetDisplayFrequency(int32_t freq)
 
-void OutputSetAudioMute(char mute)
+void OutputSetDisplayFrequency(int32_t freq)
 {
+
+    if (prevFreq != freq)
+    {
+        prevFreq = freq;
+#ifdef TESTING
+        sprintf(Line, "VFO %4u.%03u MHz", freq/1000, freq%1000);
+#else
+        sprintf(Line, "VFO %4lu.%03lu MHz", freq/1000, freq%1000);
+#endif
+
+#ifdef TESTING
+        // set color to blue
+        if (!AutoTest) printf("\033[34m");
+#endif
+        lcdHome();
+        lcdStr16(Line);
+#ifdef TESTING
+        // reset color to black
+        if (!AutoTest) printf("\033[30m");
+#endif
+    }
 }
 
 // }}}
-// {{{ void OutputSetDisplayFrequency(long int freq)
+// {{{ void OutputSetDisplaySMeter(short sValue)
 
-void OutputSetDisplayFrequency(long int freq)
+void OutputSetDisplaySMeter(uint16_t sValue)
 {
-    showFrequency(0, freq);
-}
+#ifdef TESTING
+#define C0  '.'
+#define C1  '\''
+#define C2  '"'
+#else
+#define C0  0
+#define C1  1
+#define C2  2
+#endif
+#define MaxSMeter 42
 
-// }}}
-// {{{ void OutputSetDisplaySMeter(int sValue)
+    if (sValue > MaxSMeter) sValue = MaxSMeter;
+    // first position is for the Mute indicator
+    // last position is for the TxRx indicator
+    // which leaves the display (width - 2) for the S-Meter
+    int8_t n = DISPLAY_WIDTH-2;
 
-void OutputSetDisplaySMeter(int sValue)
-{
+    lcdCursorPosition(1,1); // goto second line
+
+    // characters in the full bar are 3 lines
+    while ((sValue >= 3) & (n>0))
+    {
+        // write character 3 (3 lines)
+        lcdData(C2);
+        sValue -= 3;
+        n--;
+    }
+
+    // last char 0, 1 or 2 lines
+    switch (sValue) 
+    {
+        case 2 : lcdData(C1); 
+                 break;
+        case 1 : lcdData(C0); 
+                 break;
+                 // default: // nothing to print
+    }
+
+    // clear any remaining characters to the right
+    while (--n > 0) 
+    {
+        lcdData(' ');
+    }
+    /*
+       sprintf(Line,"  %5d", sValue);
+       lcdCursorPosition(1,1);
+       lcdStr(Line);
+     */
 }
 
 // }}}
 // {{{ void OutputSetDisplayTxRxIndicator(char indicator)
 
+// only write to the (slow) display if the indicator
+// really should be updated
+
 void OutputSetDisplayTxRxIndicator(char indicator)
 {
+    static char prevIndicator;
+
+    if (prevIndicator != indicator)
+    {
+        prevIndicator = indicator;
+        lcdCursorPosition(1, DISPLAY_WIDTH-1);
+        lcdData(indicator);
+    }
 }
 
 // }}}
-// {{{ void OutputSetDisplayMuteIndicator(char muted)
+// {{{ void OutputSetDisplayMuteIndicator(char indicator)
 
-void OutputSetDisplayMuteIndicator(char muted)
+void OutputSetDisplayMuteIndicator(char indicator)
 {
+    lcdCursorPosition(1,0);  // bottom row, first column;
+    lcdData(indicator); 
+} 
+
+// }}}
+
+// {{{ void TopLinePrinter(uint16_t ix)
+
+void TopLinePrinter(uint16_t ix)
+{
+    char *prompt = (SS_ValueEdit) ? "  " : "> ";
+
+    lcdHome();
+    sprintf(Line,"%s%-14s", prompt, theMenu[ix].name);
+    lcdStr(Line);
 }
 
 // }}}
-// /feb 2016
+// {{{ void BottomLinePrinter(uint16_t ix)
 
-// {{{ obsolete
+void BottomLinePrinter(uint16_t ix)
+{
+    int32_t val;
+    int8_t slength = -1;
+    uint8_t i;
+    char *prompt = (SS_ValueEdit) ? "> " : "  ";
+    char *valStr;
+    val = theMenu[ix].value;
+
+    // goto bottom line
+    lcdCursorPosition(1,0);
+
+    switch (ix)
+    {
+        case MMUTELEVEL :
+            slength = sprintf(Line, theMenu[ix].format, prompt, val);
+            break;
+        case MSSTART :
+        case MSEND :
+            slength = sprintf(Line, theMenu[ix].format, prompt, val/1000, val%1000);
+            break;
+
+        case MCTCSS :
+            slength = sprintf(Line, theMenu[ix].format, prompt, CtcssTones[val]/10, CtcssTones[val]%10);
+            break;
+
+        case MABAUDRATE :
+            slength = sprintf(Line, theMenu[ix].format, prompt, Baudrates[val]);
+            break;
+
+        case MAROTARYTYPE :
+            if (SS_RotaryType == 1)
+                valStr = "Step per pulse";
+            else
+                valStr = "Step per cycle";
+            slength = sprintf(Line, theMenu[ix].format, prompt, valStr);
+            break;
+
+        case MARETURNMODE :
+            slength = sprintf(Line, theMenu[ix].format, prompt, (SS_DirectMenuReturn) ? "to tuning" : "to menu");
+            break;
+
+        case MAFRONTENABLE :
+        case MAREMOTEENABLE :
+            slength = sprintf(Line, theMenu[ix].format, prompt, (val) ? "Enabled" : "Disabled");
+            break;
+
+        case MSHIFT :
+        case MAPLLREFMHZ :
+        case MAPLLREFKHZ :
+            slength = sprintf(Line, theMenu[ix].format, prompt, val/1000, val%1000);
+            break;
+
+        default:
+            slength = 0;
+    }
+    if (slength > -1)
+    {
+        for (i=slength; i<=DISPLAY_WIDTH; i++)
+            Line[i] = ' ';                  // clear rest of line
+        Line[i] = (uint8_t)0;               // set string terminator
+    }
+    lcdStr(Line);
+}
+
+// }}}
+
 // {{{ Display control routines
 
 // {{{ void lcdNib(char c)
@@ -1695,8 +2207,12 @@ void lcdCmd(char c)
 
 void lcdHome(void)
 {
+#ifdef TESTING
+    deTop();
+#else
     lcdCmd(dispHOME);
     _delay_ms(20);
+#endif
 }
 
 // }}}
@@ -1705,6 +2221,9 @@ void lcdHome(void)
 void lcdData(char c)
 {
 #ifdef TESTING
+    // set color to blue
+    //if (!AutoTest)
+    //    printf("\033[34m");
     deData(c);
 #else
     char t;
@@ -1724,8 +2243,12 @@ void lcdData(char c)
 
 void lcdStr(char *s)
 {
-    while (*s) 
+    char i=0;
+    while ((*s) && (i<DISPLAY_WIDTH))
+    {
         lcdData(*s++);
+        i++;
+    }
 }
 
 // }}}
@@ -1733,1142 +2256,152 @@ void lcdStr(char *s)
 
 void lcdStr16(char *s)
 {
-    short i=DISPLAY_WIDTH;
-    while (i--)
+    uint8_t i;
+    for (i=0; i<DISPLAY_WIDTH; i++)
         lcdData(*s++);
+#ifdef TESTING
+    printf("\n");
+#endif
 }
 
 // }}}
+// {{{ void lcdCursorPosition(int row, int column)
 
+void lcdCursorPosition(int row, int column)
+{
+    // constants defined according to the datasheet
+#define row1 0x80
+#define row2 0xC0
+
+    unsigned char position;
+
+    // guarantee the inputs are in range
+    row = row % DISPLAY_HEIGHT;  
+    column = column % DISPLAY_WIDTH;
+
+    position = row1 + column;   // coloumn + 0x80
+
+    if (row == 1)
+        position += (row2-row1);  // coloumn + 0xC0
+
+    // write position to display command register
+    lcdCmd(position);
+}
+
+// }}}}
 // }}}
 
-// {{{ void updateDisplay(void)
+// {{{ void OutputHandler(void)
 
-void updateDisplay(void)
+void OutputHandler(void)
 {
 #ifdef TESTING
-    // set color to blue
-    printf("\033[34m");
+    deFrame();
 #endif
-    lcdHome();
-    lcdStr16(DisplayBuffer[0]);
-#ifdef TESTING
-    deSetCursorPosition(1,0);
-#endif
-    lcdStr16(DisplayBuffer[1]);
-    DisplayDirty = FALSE;
-#ifdef TESTING
-    // reset color to black
-    printf("\033[30m");
-#endif
-}
 
-// }}}
-// {{{ void outputTrxBit(void) 
+    OutputSetCtcssFreq(SS_CtcssFrequency);
+    OutputSetAudioMute(SS_Muted);
 
-void outputTrxBit(void)
-{
-    if (SS_Transmitting)
+    if (SS_Tuning)
     {
-        // set transmit bit
-        sbi(PORTC, TXON);
-    } else {
-        // clear transmit bit
-        cbi(PORTC, TXON);
-    }
-}
-
-// }}}
-
-// {{{ void setDisplay(short row, char *string)
-
-void setDisplay(short row, char *string)
-{
-    strncpy(DisplayBuffer[row], string, DISPLAY_WIDTH);
-    DisplayDirty = TRUE;
-}
-
-// }}}
-// {{{ void setCTCSSfreq(void)
-
-void  setCTCSSfreq(void)
-{
-    //  showCTCSSfreq(1);
-}
-
-// }}}
-// {{{ void setMuted(void)
-
-void setMuted()
-{
-    // Mute when signal to low or when transmitting
-    if (SS_Muted || SS_Transmitting)
+        OutputSetDisplayFrequency(SS_DisplayFrequency);
+        OutputSetDisplaySMeter(SS_DisplaySMeter);
+        OutputSetDisplayTxRxIndicator(SS_TxRxIndicator);
+        OutputSetDisplayMuteIndicator(SS_MuteIndicator);
+    } else // "not Tuning" means "in menu"
     {
-        // set output mute bit
-        sbi(PORTC, MUTE);
-        // Only show the 'M' symbol in the S-Meter during regular receive mode
-        if ((menuLoopState == TUNING) && (!SS_Transmitting))
-        {
-            DisplayBuffer[1][0] = 'M';
-            DisplayDirty = TRUE;
-        }
+        OutputSetDisplayTxRxIndicator(' ');
+        OutputSetDisplayMuteIndicator(' ');
+
+        TopLinePrinter   (SS_MenuState);
+        BottomLinePrinter(SS_MenuState);
     }
-    else
-        // clear output mute bit
-        cbi(PORTC, MUTE);
-}
 
-// }}}
-
-// {{{ void showFrequency(short row, long freq)
-
-void showFrequency(short row, long fr)
-{
-    sprintf(Line, "VFO %4lu.%03lu MHz", fr/1000, fr%1000);
-    setDisplay(row,Line);
-}
-
-// }}}
-// {{{ void showCTCSSfreq(char *prompt)
-
-void showCTCSSfreq(char *prompt)
-{
-    if (SS_CtcssFrequency == 0)
-        sprintf(Line, "%s%-*s", prompt, DISPLAY_WIDTH-2, "off");
-    else
-        sprintf(Line, "%s%3d.%d Hz%*s", prompt, SS_CtcssFrequency/10,SS_CtcssFrequency%10,DISPLAY_WIDTH-10," ");
-}
-
-// }}}
-// {{{ void showTrx(void)
-
-void showTrx(void)
-{
-    DisplayBuffer[1][DISPLAY_WIDTH-1] = (SS_Transmitting) ? 'T' : 'R';
-    DisplayDirty = TRUE;
-}
-
-// }}}
-// {{{ void showSMeter(void)
-/*
-   void showSMeter(void)
-   {
-#ifdef TESTING
-short i;
-if (inputStateSMeter > 32) inputStateSMeter=32;
-for (i=0; i<inputStateSMeter/2; i++)
-DisplayBuffer[1][i]='"';
-DisplayBuffer[1][inputStateSMeter/2] = ((inputStateSMeter%2)==0) ? '\'' : '"';
-DisplayBuffer[1][(inputStateSMeter/2)+1] = ' ';
-#else
-#if FALSE
-short n = 15;
-short level = inputStateSMeter;
-
-//lcdCmd(0xc0);
-lcdCmd(dispDDRA + 0x40);
-
-// chars in the full bar are 3 lines
-level >>= 1;
-while (level >= 3) 
-{
-lcdData(2);
-level -= 3;
-n--;
-}
-
-// last char 0, 1 or 2 lines
-switch (level) 
-{
-case 2: 
-lcdData(1); 
-break;
-
-case 1: 
-lcdData(0); 
-break;
-
-default: 
-lcdData(' ');
-}
-
-// clear any chars to the right
-while (--n > 0) 
-lcdData(' ');
-#endif
-#endif
-}
- */
-// }}}
-// {{{ void clearSMeter(void)
-
-void clearSMeter(void)
-{
-    sprintf(DisplayBuffer[1],"%*s",DISPLAY_WIDTH," ");
-    DisplayDirty = TRUE;
-}
-
-// }}}
-
-// {{{ void bottomLinePrinter(short index, char *prompt)
-
-void bottomLinePrinter(short index, char *prompt)
-{
-    long val;
-
-    if (((index & TYPEMASK) == MAINMENU) || ((index & TYPEMASK) == MAINMENU_VAL))
-        val = menuValues[index & STATEMASK];
-    else
-        val = subMenuValues1[index & STATEMASK];
-
-    // bottom line
-    switch (index)
-    {
-        case MSSTART :
-        case MSSTARTVAR :
-        case MSEND :
-        case MSENDVAR :
-#ifdef DBG_LOGGING
-            fprintf(dbg,"point a\n");
-#endif
-            sprintf(Line, "%s%04ld.%03ld MHz", prompt, val/1000, val%1000);
-#ifdef DBG_LOGGING
-            fprintf(dbg,"point b\n");
-#endif
-            break;
-
-        case MCTCSS :
-        case MCTCSSVAR :
-            showCTCSSfreq(prompt);
-            //sprintf(Line, "%s%3d.%d Hz%*s", prompt, val/10, val%10, DISPLAY_WIDTH-10, " ");
-            break;
-
-        case MBACK :
-        case MSCAN :
-        case MSETTINGS :
-            sprintf(Line, "%*s", DISPLAY_WIDTH, " ");
-            break;
-
-        case MARETURNMODE :
-        case MARETURNMODEVAR :
-            sprintf(Line, "%s%-*s", prompt, DISPLAY_WIDTH-2, (SS_DirectMenuReturn) ? "to tuning" : "to menu");
-            break;
-
-        case MAREFFREQ :
-        case MAREFFREQVAR :
-            sprintf(Line, "%s%2ld.%03ld MHz%*s", prompt, val/1000, val%1000, DISPLAY_WIDTH-14, " ");
-            break;
-
-        default : 
-            sprintf(Line, "%s%-*ld", prompt, DISPLAY_WIDTH-2, val);
-    }
-    setDisplay(1, Line);
-}
-
-// }}}
-// {{{ void showMenuItem()
-
-void showMenuItem()
-{
-    // top line
-    switch (menuLoopState)
-    {
-        case MBACK :
-        case MSCAN :
-        case MSETTINGS :
-#ifdef DBG_LOGGING
-            fprintf(dbg,"point 1\n");
-#endif
-            sprintf(Line,"> %-*s",DISPLAY_WIDTH-2, menuStrings[menuLoopState & STATEMASK]);
-#ifdef DBG_LOGGING
-            fprintf(dbg,"point 2\n");
-#endif
-            break;
-
-        default : 
-#ifdef DBG_LOGGING
-            fprintf(dbg,"point 3\n");
-#endif
-            sprintf(Line,"> Set %-*s",DISPLAY_WIDTH-6, menuStrings[menuLoopState & STATEMASK]);
-#ifdef DBG_LOGGING
-            fprintf(dbg,"point 4\n");
-#endif
-    }
-    setDisplay(0, Line);
-
-    // bottom line
-#ifdef DBG_LOGGING
-    fprintf(dbg,"point 5\n");
-#endif
-    bottomLinePrinter(menuLoopState,"  "); 
-#ifdef DBG_LOGGING
-    fprintf(dbg,"point 6\n");
-#endif
-}
-
-// }}}
-// {{{ void showMenuItemValue()
-
-void showMenuItemValue()
-{
-    // top line
-    sprintf(Line,"  Set %-*s", DISPLAY_WIDTH-6, menuStrings[menuLoopState & STATEMASK]);
-    setDisplay(0, Line);
-
-    // bottom line
-    bottomLinePrinter(menuLoopState,"> "); 
-}
-
-// }}}
-// {{{ void showSubmenu1Item(void)
-
-void showSubmenu1Item(void)
-{
-    // top line
-    switch (menuLoopState)
-    {
-        case MARETURNMODE :
-        case MAREFFREQ    :
-            sprintf(Line,"> %-*s",DISPLAY_WIDTH-2, subMenuStrings1[menuLoopState & STATEMASK]);
-            break;
-    }
-    setDisplay(0, Line);
-
-    // bottom line
-    bottomLinePrinter(menuLoopState,"  "); 
-}
-
-// }}}
-// {{{ void showSubmenuItemValue()
-
-void showSubmenu1ItemValue()
-{
-    // top line
-    sprintf(Line,"  %-*s", DISPLAY_WIDTH-2, subMenuStrings1[menuLoopState & STATEMASK]);
-    setDisplay(0, Line);
-
-    // bottom line
-    bottomLinePrinter(menuLoopState,"> "); 
-}
-
-// }}}
-
-// {{{ PLL
-
-// {{{ void setPLL(long r)
-
-void setPLL(long r)
-{
-#ifdef TESTING
-
-    // $$$FHE do nothing for now
-
-#else
-    short i;
-
-    for (i=0; i<24; i++) {
-        if (r & 0x800000)
-            sbi(PORTC, ADATA);
-        else
-            cbi(PORTC, ADATA);
-        _delay_us(1);
-        sbi(PORTC, ACLK);
-        _delay_us(1);
-        cbi(PORTC, ACLK);
-        r <<= 1;
-    }
-    _delay_us(1);
-    sbi(PORTC, ALE);
-    _delay_us(1);
-    cbi(PORTC, ALE);
-#endif
-}
-
-// }}}
-// {{{ void setFreq(long f)
-
-void setFreq(long f)
-{
-    long reg, frast, A, B;
-
-    f = (SS_Transmitting) ? f : f-IF;
-    frast = f/CHANNELSTEP;
-    B = frast/16;
-    A = frast%16;
-
-    reg = ((B & 0x1fff)<<8) + ((A & 0x3f)<<2) + 1;
-
-    setPLL(reg);
-}
-
-// }}}
-
-// }}}
-// }}}
-// }}}
-
-// {{{ obsolete
-// {{{ void showItem(void)
-
-void showItem(void)
-{
-    switch (menuLoopState & TYPEMASK)
-    {
-        case MAINMENU :
-            showMenuItem();
-            break;
-        case MAINMENU_VAL:
-            showMenuItemValue();
-            break;
-        case SUBMENU1 :
-            showSubmenu1Item();
-            break;
-        case SUBMENU1_VAL:
-            showSubmenu1ItemValue();
-            break;
-    }
-}
-
-// }}}
-// {{{ short getMaxMenuIndex(void)
-
-short getMaxMenuIndex(void)
-{
-    short max;
-    switch (menuLoopState & TYPEMASK)
-    {
-        case MAINMENU : 
-            max = MAINMENU_END;
-            break;
-        case MAINMENU_VAL : 
-            max = MAINMENU_VAL_END;
-            break;
-        case SUBMENU1 : 
-            max = SUBMENU1_END;
-            break;
-        case SUBMENU1_VAL : 
-            max = SUBMENU1_VAL_END;
-            break;
-
-            // this value should never occur
-        default :
-            max = 666;
-    }
-    return max;
-}
-
-// }}}
-// {{{ void nextMenuItem(void)
-/*
-   void nextMenuItem(void)
-   {
-   short max = getMaxMenuIndex();  
-
-   menuLoopState++;
-   if ((menuLoopState & STATEMASK) > (max & STATEMASK))
-   menuLoopState = max & TYPEMASK;
-   inputStateRotary = IDLE;
-   }
- */
-// }}}
-// {{{ void prevMenuItem(void)
-
-/*
-   void prevMenuItem(void)
-   {
-   short max = getMaxMenuIndex();
-
-   menuLoopState--;
-// STATEMASK is -1 in 6bit signed mode 
-if ((menuLoopState & STATEMASK) == STATEMASK)
-menuLoopState = max;
-inputStateRotary = IDLE;
-}
- */
-
-// }}}
-// {{{ void mainLoopObsolete(void)
-/*
-   void mainLoopObsolete(void)
-   {
-   char busy = TRUE;
-   while (busy)
-   {
-// {{{ handle inputs
-
-// input stuff
-SS_RotaryCount  = InputGetRotary();
-SS_Selector     = InputGetSelector();
-SS_PTT          = InputGetPTT();
-SS_ShiftEnable  = InputGetShift();
-SS_SMeter       = InputGetSMeter();
-
-// }}}
-// {{{ testing
-#ifdef TESTING
-getInputLargeStep();
-
-char c;
-if ((c = FHEgetc()))
-busy = !((c == 'q') || (c == 27)); // not 'q' and not escape
-
-// swallow unused input characters
-(void)FHEgetc();
-#endif
-// }}}
-// {{{ output and processing state machine
-
-// DEBUG $$$ FHE start of output state machine
-sbi(PORTB,PB3);
-
-// the state machine does all the processing
-switch (menuLoopState)
-{
-// {{{ case TUNING : and input processing
-
-case TUNING : // 0
-
-// {{{ inputStateRotary
-
-// suppress frequency change during transmit
-if (Transmitting) inputStateRotary = IDLE;
-
-
-switch (inputStateRotary)
-{
-case UPEVENT :
-DialFrequency += (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
-if (DialFrequency > BANDTOP) DialFrequency=BANDBOTTOM;
-setFrequency();
-break;
-
-case DOWNEVENT : 
-DialFrequency -= (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
-if (DialFrequency < BANDBOTTOM) DialFrequency=BANDTOP;
-setFrequency();
-break;
-}
-#ifdef DBG_LOGGING
-fprintf(dbg, "fr-%ld \n",DialFrequency);
-#endif
-
-inputStateRotary = IDLE;
-
-// }}}
-// {{{ inputStatePTT
-
-switch (inputStatePTT)
-{
-case TXEVENT :
-Transmitting = TRUE;
-
-// stop scanning when PTT activated
-Scanning = FALSE; 
-
-// don't display the S-meter during transmit
-inputStateSMeter = 0;
-clearSMeter();
-
-setTransmitter();
-break;
-
-case RXEVENT :
-Transmitting = FALSE;
-setTransmitter();
-break;
-}
-inputStatePTT= IDLE;
-
-// }}}
-// {{{ inputStateShift
-
-switch (inputStateShift)
-{
-    case SHIFTONEVENT :
-        ShiftEnable = TRUE;
-        setFrequency();
-        inputStateShift= IDLE;
-        break;
-
-    case SHIFTOFFEVENT :
-        ShiftEnable = FALSE;
-        setFrequency();
-        inputStateShift= IDLE;
-        break;
-}
-
-// }}}
-// {{{ inputStateLargeStep
-
-switch (inputStateLargeStep)
-{
-    case LARGEEVENT :
-        LargeStepEnable = !LargeStepEnable;
-        inputStateLargeStep = IDLE;
-        break;
-}
-
-// }}}
-// {{{ inputStateSelector
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        menuLoopState = MAINMENU;
-        // stop scanning when entering the menu
-        Scanning = FALSE;
-        inputStateSelector = SELECTBOUNCING;
-        break;
-}
-break;
-
-// }}}
-
-// }}}
-// {{{ main menu item selection
-// {{{  case MMUTELEVEL :
-
-case MMUTELEVEL : 
-case MSHIFT     : 
-case MCTCSS     : 
-case MSSTART    : 
-case MSEND      : 
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        nextMenuItem();
-        break;
-
-    case DOWNEVENT : 
-        prevMenuItem();
-        break;
-}
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        // switch from item selection to value selection
-        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU_VAL;
-        inputStateSelector = SELECTBOUNCING;
-        break;
-}
-switch (menuLoopState & TYPEMASK)
-{
-    case MAINMENU :
-        showMenuItem();
-        break;
-    case MAINMENU_VAL:
-        showMenuItemValue();
-        break;
-}
-break;
-
-// }}}
-// {{{  case MSCAN:
-
-case MSCAN : // 5
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        nextMenuItem();
-        break;
-
-    case DOWNEVENT : 
-        prevMenuItem();
-        break;
-}
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        menuLoopState = TUNING;
-        Scanning = !Scanning;
-        inputStateSelector = SELECTBOUNCING;
-        showFrequency(0, CurrentFrequency);
-        break;
-}
-showMenuItem();
-break;
-
-// }}}
-// {{{  case MSETTINGS :
-
-case MSETTINGS : // 6
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        nextMenuItem();
-        showMenuItem();
-        break;
-
-    case DOWNEVENT : 
-        prevMenuItem();
-        showMenuItem();
-        break;
-}
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        menuLoopState = MARETURNMODE;
-        inputStateSelector = SELECTBOUNCING;
-        showFrequency(0, CurrentFrequency);
-        break;
-}
-break;
-
-// }}}
-// {{{  case MBACK :
-
-case MBACK : // 7
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        nextMenuItem();
-        showMenuItem();
-        break;
-
-    case DOWNEVENT : 
-        prevMenuItem();
-        showMenuItem();
-        break;
-}
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        menuLoopState = TUNING;
-        inputStateSelector = SELECTBOUNCING;
-        showFrequency(0, CurrentFrequency);
-        break;
-}
-break;
-
-// }}}
-// }}}
-// {{{ main menu value selection
-// {{{  case MMUTELEVELVAR :
-
-case MMUTELEVELVAR : 
-// {{{ up/down
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        MuteLevel = (MuteLevel<MAXMUTELEVEL) ? MuteLevel+1 : MuteLevel;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = MuteLevel;
-        break;
-
-    case DOWNEVENT : 
-        MuteLevel = (MuteLevel>0) ? MuteLevel-1 : 0;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = MuteLevel;
-        break;
-}
-// }}}
-// {{{ select
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
-        inputStateSelector = SELECTBOUNCING;
-        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
-        break;
-}
-// }}}
-showItem();
-// }}}
-// {{{  case MSHIFTVAR :
-
-case MSHIFTVAR : 
-// {{{ up/down
-
-// suppress frequency change during transmit
-if (Transmitting) inputStateRotary = IDLE;
-
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        FrequencyShift = (FrequencyShift < MAXSHIFT) ? FrequencyShift+1 : MAXSHIFT;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = FrequencyShift;
-        break;
-
-    case DOWNEVENT : 
-        FrequencyShift = (FrequencyShift > MINSHIFT) ? FrequencyShift-1 : MINSHIFT;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = FrequencyShift;
-        break;
-}
-// }}}
-// {{{ select
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
-        menuValues[menuLoopState & STATEMASK] = FrequencyShift;
-        inputStateSelector = SELECTBOUNCING;
-        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
-        break;
-}
-//menuValues[menuLoopState & STATEMASK] = FrequencyShift;
-// }}}
-showItem();
-break;
-
-// }}}
-// {{{  case MCTCSSVAR :
-
-case MCTCSSVAR : // 202
-// {{{ up/down
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        inputStateRotary = IDLE;
-        ctcssIndex++;
-        if (CtcssTones[ctcssIndex] == -1) 
-            ctcssIndex--;
-        CTCSSfrequency = CtcssTones[ctcssIndex]; 
-        menuValues[menuLoopState & STATEMASK] = CTCSSfrequency;
-        break;
-
-    case DOWNEVENT : 
-        inputStateRotary = IDLE;
-        ctcssIndex--;
-        if (ctcssIndex == -1)
-            ctcssIndex=0;
-        CTCSSfrequency = CtcssTones[ctcssIndex]; 
-        menuValues[menuLoopState & STATEMASK] = CTCSSfrequency;
-        break;
-}
-// }}}
-CTCSSenable    = (CTCSSfrequency != 0);
-// {{{ select
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
-        menuValues[menuLoopState & STATEMASK] = CTCSSfrequency;
-        inputStateSelector = SELECTBOUNCING;
-        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
-        break;
-}
-// }}}
-showItem();
-setCTCSSfreq();
-break;
-
-// }}}
-// {{{  case MSSTARTVAR
-
-case MSSTARTVAR : 
-// {{{ up/down
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        ScanStartFrequency += (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
-        if (ScanStartFrequency > ScanEndFrequency) ScanStartFrequency = ScanEndFrequency;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = ScanStartFrequency;
-        break;
-
-    case DOWNEVENT : 
-        ScanStartFrequency -= (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
-        if (ScanStartFrequency < BANDBOTTOM) ScanStartFrequency = BANDBOTTOM;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = ScanStartFrequency;
-        break;
-}
-// }}}
-// {{{ select
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        // switch back to item selection
-        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
-
-        menuValues[menuLoopState & STATEMASK] = ScanStartFrequency;
-        inputStateSelector = SELECTBOUNCING;
-        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
-        break;
-}
-
-// }}}
-showItem();
-break;
-
-// }}}
-// {{{  case MSENDVAR
-
-case MSENDVAR : 
-// {{{ up/down
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        ScanEndFrequency += (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
-        if (ScanEndFrequency > BANDTOP) ScanEndFrequency = BANDTOP;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = ScanEndFrequency;
-        break;
-
-    case DOWNEVENT : 
-        ScanEndFrequency -= (LargeStepEnable) ? LARGESTEP : CHANNELSTEP;
-        if (ScanEndFrequency < ScanStartFrequency) ScanEndFrequency = ScanStartFrequency;
-        inputStateRotary = IDLE;
-        menuValues[menuLoopState & STATEMASK] = ScanEndFrequency;
-        break;
-}
-// }}}
-// {{{ select
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        // switch back to item selection
-        menuLoopState = (menuLoopState & STATEMASK) + MAINMENU;
-
-        menuValues[menuLoopState & STATEMASK] = ScanEndFrequency;
-        inputStateSelector = SELECTBOUNCING;
-        menuLoopState = (DirectMenuReturn) ? TUNING : menuLoopState;
-        break;
-}
-
-// }}}
-showItem();
-break;
-
-// }}}
-// }}}
-// {{{ submenu item selection
-// {{{  case MARETURNMODE:
-
-case MARETURNMODE:      // 400
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        nextMenuItem();
-        break;
-
-    case DOWNEVENT : 
-        prevMenuItem();
-        break;
-}
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        // switch from item selection to value selection
-        menuLoopState = (menuLoopState & STATEMASK) + SUBMENU1_VAL;
-        inputStateSelector = SELECTBOUNCING;
-        break;
-}
-showItem();
-break;
-
-// }}}
-// {{{  case MAREFFREQ
-
-case MAREFFREQ :
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        nextMenuItem();
-        break;
-
-    case DOWNEVENT : 
-        prevMenuItem();
-        break;
-}
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        // switch from item selection to value selection
-        menuLoopState = (menuLoopState & STATEMASK) + SUBMENU1_VAL;
-        inputStateSelector = SELECTBOUNCING;
-        break;
-}
-showItem();
-break;
-
-// }}}
-// }}}
-// {{{ submenu value selection
-// {{{  case MARETURNMODEVAR
-
-case MARETURNMODEVAR :
-// {{{ up/down
-switch (inputStateRotary)
-{
-    case UPEVENT :
-    case DOWNEVENT : 
-        DirectMenuReturn = !DirectMenuReturn;
-        inputStateRotary = IDLE;
-        subMenuValues1[menuLoopState & STATEMASK] = DirectMenuReturn;
-        break;
-}
-// }}}
-// {{{ select
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        // immediate switch back to mainmenu selection
-        menuLoopState = MSETTINGS;
-        subMenuValues1[menuLoopState & STATEMASK] = DirectMenuReturn;
-        inputStateSelector = SELECTBOUNCING;
-        break;
-}
-
-// }}}
-showItem();
-break;
-
-// }}}
-// {{{  case MAREFFREQVAR
-
-case MAREFFREQVAR :
-// {{{ up/down
-switch (inputStateRotary)
-{
-    case UPEVENT :
-        inputStateRotary = IDLE;
-        refFreqIndex++;
-        if (refFreqPLL[refFreqIndex] == -1) 
-            refFreqIndex--;
-        subMenuValues1[menuLoopState & STATEMASK] = refFreqPLL[refFreqIndex];
-        break;
-
-    case DOWNEVENT : 
-        inputStateRotary = IDLE;
-        refFreqIndex--;
-        if (refFreqIndex == -1) 
-            refFreqIndex=0;
-        subMenuValues1[menuLoopState & STATEMASK] = refFreqPLL[refFreqIndex];
-        break;
-}
-// }}}
-// {{{ select
-
-switch (inputStateSelector)
-{
-    case SELECTEVENT :
-        // immediate switch back to mainmenu selection
-        menuLoopState = MSETTINGS;
-        subMenuValues1[menuLoopState & STATEMASK] = refFreqPLL[refFreqIndex];
-        inputStateSelector = SELECTBOUNCING;
-        break;
-}
-
-// }}}
-showItem();
-break;
-
-// }}}
-// }}}
-}
-// {{{ scanner
-#ifdef TESTING
-if (Scanning)
-{   
-    short StepDelay=125;
-    clock_t now = clock();
-    currentTime = (float)now * 1000.0F / CLOCKS_PER_SEC;
-    goStep = (currentTime - prevStepTime) > StepDelay;
-    if (goStep)
-    {   
-        prevStepTime = currentTime;
-        DialFrequency =
-            (DialFrequency > ScanEndFrequency) ? ScanStartFrequency : DialFrequency+CHANNELSTEP;
-        setFrequency();
-    }
-}   
-#else
-// $$$ FHE TODO
-#endif
-// }}}
-// {{{ squelch
-
-if ((!Transmitting) && (menuLoopState == TUNING)) 
-    showSMeter();
-if (menuLoopState == TUNING)
-    showTrx();
-
-    Muted = (inputStateSMeter < MuteLevel);
-    setMuted();
-
-    // }}}
-
-    updateDisplay();
-
-    // }}}
-
-
-    // DEBUG $$$ FHE end of output state machine
-    cbi(PORTB,PB3);
-    // pulse width is output processing time
-    // frequency is system main-loop time 
+    OutputSetVfoFrequency (SS_VfoFrequency);
+    OutputSetTransmitterOn(SS_Transmitting);
 
     // {{{ testing and debugging
 #ifdef TESTING
 
-if (TRUE)
-{
-    ttySetCursorPosition(DBGROW,1);
-    printf("\033[37m"); // light gray
-    printf("========================= debug ========================\r\n");
-    printf("CTCSSenable     =      %3s  | ",yesno(CTCSSenable));
-    printf("inputStateRotary= %8d\r\n",inputStateRotary);
+    if (TRUE)
+    {
+        if (!AutoTest) ttySetCursorPosition(DBGROW,0);
+        if (!AutoTest) printf("\033[37m"); // light gray
+        printf("\n========================= debug ========================"); 
+        NL();
+        printf("CTCSSindex      =      %3d  | ",SS_CtcssIndex);
+        printf("SS_Tuning       =        %d",SS_Tuning);
+        NL();
+        //            printf("inputStateRotary= %8d\n",inputStateRotary);
 
-    printf("CTCSSfrequency  = %8d  | ",CTCSSfrequency);
-    printf("menuLoopState   =     %04X\r\n",menuLoopState);
+        printf("CTCSSfrequency  = %8d  | ",SS_CtcssFrequency);
+        printf("SS_MenuState    =     %04X",SS_MenuState ); 
+        NL();
 
-    printf("MuteLevel       = %8d  | ",MuteLevel);
-    printf("menuLoopState S = %8d\r\n",menuLoopState & STATEMASK);
+        printf("MuteLevel       = %8d  | ",SS_MuteLevel);
+        printf("SS_ValueEdit    = %8d",SS_ValueEdit);
+        NL();
 
-    printf("ShiftEnable     =      %3s  | ",yesno(ShiftEnable));
-    printf("menuLoopState T =     %04X\r\n",menuLoopState & TYPEMASK);
+        printf("ShiftEnable     =      %3s  | ",yesno(SS_ShiftEnable));
+        //printf("menuLoopState T =     %04X",menuLoopState & TYPEMASK); 
+        NL();
 
-    printf("LargeEnable     =      %3s  | ",yesno(LargeStepEnable));
-    printf("\r\n");
+        //            printf("LargeEnable     =      %3s  | ",yesno(SS_LargeStepEnable));
+        //            printf("\n");
 
-    printf("FrequencyShift  = %8d  |",FrequencyShift);
-    printf("\r\n");
+        printf("FrequencyShift  = %8d  | ",SS_FrequencyShift);
+        printf("BaseFrequency   = %8d",SS_BaseFrequency); 
+        NL();
 
-    printf("Transmitting    =      %3s  | ",yesno(Transmitting));
-    printf("\r\n");
+        printf("Transmitting    =      %3s  | ",yesno(SS_Transmitting));
+        printf("VfoFrequency    = %8d",SS_VfoFrequency);
+        NL();
 
-    printf("Scanning        =      %3s  | ",yesno(Scanning));
-    printf("\r\n");
+        printf("Scanning        =      %3s  | ",yesno(SS_Scanning));
+        printf("SS_PllReference = %4u.%03u", SS_PllReferenceFrequency/1000, SS_PllReferenceFrequency%1000);
+        NL();
 
-    printf("Scan Start      = %4lu.%03lu  | ", ScanStartFrequency/1000, ScanStartFrequency%1000);
-    printf("\r\n");
+        printf("Scan Start      = %4u.%03u  | ", SS_ScanStartFrequency/1000, SS_ScanStartFrequency%1000);
+        printf("Scan End        = %4u.%03u", SS_ScanEndFrequency/1000, SS_ScanEndFrequency%1000);
+        NL();
 
-    printf("Scan End        = %4lu.%03lu  | ", ScanEndFrequency/1000, ScanEndFrequency%1000);
-    printf("\r\n");
+        printf("SS_SMeterIn     =    %5d  | ", (int)SS_SMeterIn);
+        printf("SS_DisplaySMeter=    %5d", (int)SS_DisplaySMeter);
+        NL();
 
-    // printf("currentTime     = %8d\r\n",currentTime);
-    // printf("prevStepTime    = %8d\r\n",prevStepTime);
-    // printf("ctcssIndex      = %8d\r\n",ctcssIndex);
-    // printf("vInRotState     = %8d\r\n",vInRotState);
-    // printf("unget charbuf   = %8X\r\n",GetcBuffer);
-    // printf("unget charvail  = %8s\r\n",yesno(GetcAvail));
-    printf("========================================================\r\n");
-    // printf("|%-*s|\r\n", DISPLAY_WIDTH, DisplayBuffer[0]);
-    // printf("|%-*s|\r\n", DISPLAY_WIDTH, DisplayBuffer[1]);
-    // printf("=====================\r\n");
-    printf("\033[30m"); // black
-}
-else
-{
-    deSetCursorPosition(DBGROW,1);
-    printf("2");
-}
+        printf("SS_RotaryCount  =    %5d  | ", SS_RotaryCount);
+        printf("SS_Selected     =        %1d", SS_Selected);
+        NL();
+
+        printf("tmpFreqChanged  =    %5d  | ", tmpFreqChanged);
+        printf("tmpFreqSaved    =    %5d ", tmpFreqSaved);
+        NL();
+
+        // printf("lastFrequencyChange= %8lu ",lastFrequencyChange);
+        // printf("now                = %8lu",now);
+        // NL();
+        // printf("clocks per sec = %d ",CLOCKS_PER_SEC);
+        // NL();
+
+        // printf("ctcssIndex      = %8d\n",ctcssIndex);
+        // printf("vInRotState     = %8d\n",vInRotState);
+        // printf("keypressed  = %8X\n",theKey);
+        // printf("unget charvail  = %8s\n",yesno(GetcAvail));
+        printf("========================================================\n"); NL();
+        if (!AutoTest) printf("\033[30m"); // black
+    }
+    else
+    {
+        deSetCursorPosition(DBGROW,1);
+    }
 #endif
-// }}}
+    // }}}
 }
-}
-*/
+
+// }}} Output handling
+
 // }}}
-// }}} obsolete
+
 // {{{ void mainLoop(void)
 
 void mainLoop(void)
@@ -2876,184 +2409,13 @@ void mainLoop(void)
     char busy = TRUE;
     while (busy)
     {
-        // {{{ Input handling
+        busy = InputHandler();
+        RemoteControlHandler();
+        ProcessingHandler();
+        OutputHandler();        
 
-        SS_RotaryCount = InputGetRotaryDialCount();
-        SS_Selected    = InputGetSelectorPushed();
-        SS_ShiftEnable = InputGetShiftEnable();
-        SS_PTT         = InputGetPTT();
-        SS_SMeterIn    = InputGetSMeter();
+        tbi(PORTB, 2); // for measuring loop timing
 
-        // {{{ read keyboard for test
-
-#ifdef TESTING
-        // clear now, set to TRUE and process when 'e' key is pressed
-        SS_Selected = FALSE;
-
-        char theKey;
-        char c;
-        if ((c = FHEgetc()))
-        {
-            theKey = c;
-            switch (c)
-            {
-                case 27  : // 27 is the ESCAPE character
-                case 'q' : busy = FALSE;
-                           theKey = c;
-                           break;
-
-                case '[' : SS_RotaryCount = -1;
-                           theKey = c;
-                           break;
-
-                case ']' : SS_RotaryCount = +1;
-                           theKey = c;
-                           break;
-
-                case 't' : SS_PTT = TRUE;
-                           theKey = c;
-                           break;
-
-                case 'r' : SS_PTT = FALSE;
-                           theKey = c;
-                           break;
-
-                case 's' : SS_ShiftEnable = TRUE;
-                           theKey = c;
-                           break;
-
-                case 'a' : SS_ShiftEnable = FALSE;
-                           theKey = c;
-                           break;
-
-                case 'e' : SS_Selected = TRUE;
-                           theKey = c;
-                           break;
-
-                default:
-                           // swallow unused input characters by 
-                           // calling the non-blocking FHEgetc();
-                           (void)FHEgetc();
-            }
-        }
-
-#endif
-
-        // }}}
-
-        // }}} input handling
-        // {{{ Remote Control will take place here
-        // }}}
-        // {{{ Processing
-
-        // {{{ // Tuning
-        if (!SS_Transmitting)
-        {
-            if (SS_RotaryCount != 0)
-            {
-                SS_BaseFrequency  += SS_RotaryCount * CHANNELSTEP;
-                SS_VfoFrequency = SS_BaseFrequency - IF;
-                SS_DisplayFrequency = SS_BaseFrequency;
-            }
-        }
-
-        // }}}
-        // {{{ // Push To Talk
-
-        SS_Transmitting = SS_PTT;
-        SS_TxRxIndicator = (SS_Transmitting) ? 'T' : 'R';
-
-        // }}}
-        // {{{ // Squelch
-
-        SS_DisplaySMeter = (1024-SS_SMeterIn) - 44;
-
-        // low pass s-meter signal
-        SS_DisplaySMeter += LowPass;
-        SS_DisplaySMeter >>= 1;
-        LowPass= SS_DisplaySMeter;
-
-        SS_Muted = (SS_MuteLevel > SS_DisplaySMeter);
-        SS_MuteIndicator = (SS_Muted) ? 'M' : ' ';
-
-        // }}}
-
-        // }}} Processing
-        // {{{ Output handling
-
-        OutputSetCtcssFreq(SS_CtcssFrequency);
-        OutputSetAudioMute(SS_Muted);
-        OutputSetDisplaySMeter(SS_DisplaySMeter);
-        OutputSetDisplayMuteIndicator(SS_MuteIndicator);
-        OutputSetDisplayTxRxIndicator(SS_TxRxIndicator);
-        OutputSetDisplayFrequency(SS_BaseFrequency);
-
-        OutputSetVfoFrequency(SS_VfoFrequency);
-        OutputSetTransmitterOn(SS_Transmitting);
-
-        // {{{ testing and debugging
-#ifdef TESTING
-
-        deFrame();
-
-        if (TRUE)
-        {
-            ttySetCursorPosition(DBGROW,1);
-            printf("\033[37m"); // light gray
-            printf("========================= debug ========================\r\n");
-            printf("CTCSSindex      =      %3d  | ",SS_CtcssIndex);
-            printf("\r\n");
-            //            printf("inputStateRotary= %8d\r\n",inputStateRotary);
-
-            printf("CTCSSfrequency  = %8d  | ",SS_CtcssFrequency);
-            printf("menuLoopState   =     %04X\r\n",menuLoopState);
-
-            printf("MuteLevel       = %8d  | ",SS_MuteLevel);
-            printf("menuLoopState S = %8d\r\n",menuLoopState & STATEMASK);
-
-            printf("ShiftEnable     =      %3s  | ",yesno(SS_ShiftEnable));
-            printf("menuLoopState T =     %04X\r\n",menuLoopState & TYPEMASK);
-
-            //            printf("LargeEnable     =      %3s  | ",yesno(SS_LargeStepEnable));
-            //            printf("\r\n");
-
-            printf("FrequencyShift  = %8ld  | ",SS_FrequencyShift);
-            printf("BaseFrequency   = %8ld\r\n",SS_BaseFrequency);
-
-            printf("Transmitting    =      %3s  | ",yesno(SS_Transmitting));
-            printf("VfoFrequency    = %8ld\r\n",SS_VfoFrequency);
-
-            printf("Scanning        =      %3s  | ",yesno(SS_Scanning));
-            printf("\r\n");
-
-            printf("Scan Start      = %4lu.%03lu  | ", SS_ScanStartFrequency/1000, SS_ScanStartFrequency%1000);
-            printf("\r\n");
-
-            printf("Scan End        = %4lu.%03lu  | ", SS_ScanEndFrequency/1000, SS_ScanEndFrequency%1000);
-            printf("\r\n");
-
-            // printf("currentTime     = %8d\r\n",currentTime);
-            // printf("prevStepTime    = %8d\r\n",prevStepTime);
-            // printf("ctcssIndex      = %8d\r\n",ctcssIndex);
-            // printf("vInRotState     = %8d\r\n",vInRotState);
-            printf("keypressed  = %8X\r\n",theKey);
-            // printf("unget charvail  = %8s\r\n",yesno(GetcAvail));
-            printf("========================================================\r\n");
-            // printf("|%-*s|\r\n", DISPLAY_WIDTH, DisplayBuffer[0]);
-            // printf("|%-*s|\r\n", DISPLAY_WIDTH, DisplayBuffer[1]);
-            // printf("=====================\r\n");
-            printf("\033[30m"); // black
-        }
-        else
-        {
-            deSetCursorPosition(DBGROW,1);
-            printf("2");
-        }
-#endif
-        // }}}
-
-        updateDisplay();
-        // }}} Output handling
     }
 }
 
@@ -3065,20 +2427,29 @@ int main(int argc, char *argv[])
     // {{{ testing
 
 #ifdef TESTING
-    ttyClearScreen();
-    ttySetCursorPosition(0,0);
-    printf("========= 23cm NBFM control software simulator =========\n");
-    printf("\n");
-    printf("q quit\n"); 
-    printf("[ downward rotating         ] upward rotating\n"); 
-    printf("t transmit                  r receive\n"); 
-    printf("s shift on                  a shift off\n");
-    printf("e menu selector button      l toggle large steps on/off\n"); 
-    printf("\n");
-    set_conio_terminal_mode();
-#ifdef DBG_LOGGING
-    dbg = fopen("log.txt","w");
-#endif
+    if (argc>1)
+    {
+        if (strcmp(argv[1],"-a") == 0)
+            AutoTest = TRUE;
+        if (strcmp(argv[1],"-d") == 0)
+            dbg_logging = TRUE;
+    }
+
+    if (!AutoTest)
+    {
+        ttyClearScreen();
+        ttySetCursorPosition(0,0);
+        printf("========= 23cm NBFM control software simulator =========\n");
+        printf("\n");
+        printf("q quit\n"); 
+        printf("[ downward rotating         ] upward rotating\n"); 
+        printf("t transmit                  r receive\n"); 
+        printf("s shift on                  a shift off\n");
+        printf("e menu selector button      l toggle large steps on/off\n"); 
+        printf("\n");
+        set_conio_terminal_mode();
+    }
+    if (dbg_logging) dbg = fopen("log.txt","w");
 #endif
 
     // }}}
@@ -3089,13 +2460,16 @@ int main(int argc, char *argv[])
     // {{{ testing
 
 #ifdef TESTING
-#ifdef DBG_LOGGING
-    fclose(dbg);
-#endif
+    eeprom=fopen("eeprom.bin","w");
+    for (int i=0; i<16; i++)
+        fwrite(&theMenu[i].value, sizeof(int32_t),1, eeprom);
+    fclose(eeprom);
+
+    if (dbg_logging) fclose(dbg);
     // position cursor below lowest printed line
-    ttySetCursorPosition(25,0);
+    if (!AutoTest) ttySetCursorPosition(27,0);
     // cursor back on
-    printf("\033[?25h");   
+    if (!AutoTest) printf("\033[?25h");   
     // short i;
     // for (i=0x20; i<255; i++) printf("%X-%c ", i,i);
 #endif

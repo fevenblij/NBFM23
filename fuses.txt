@@ -1,0 +1,21 @@
+mac01:NBFM-SIM frans$ ./avrprogramNBFM 
+
+avrdude: AVR device initialized and ready to accept instructions
+Reading | ################################################## | 100% 0.16s
+avrdude: Device signature = 0x1e950f
+avrdude: safemode: Fuses OK (H:07, E:D9, L:62)
+avrdude done.  Thank you.
+
+mac01:NBFM-SIM frans$ 
+
+# 1 MHz internal clock
+L: 0x62
+H: 0x07 
+E: 0xD9
+
+# 8 MHz internal clock
+L: 0xE2		// devide by 8 is false
+H: 0x07		// no change
+E: 0xF9		// unused bits set to 1
+
+-U lfuse:w:0xe2:m -U hfuse:w:0x07:m -U efuse:w:0xf9:m 

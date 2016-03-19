@@ -5,3 +5,11 @@ Architecture-and-design-23cm-NBFM01.odt
 int16.c
 zOlder
 .DS_Store
+NBFM_Simulator
+NBFM_Simulator.eep     
+NBFM_Simulator.hex     
+NBFM_Simulator.map
+NBFM_Simulator.elf     
+NBFM_Simulator.lss     
+NBFM_Simulator.o
+
