@@ -100,7 +100,7 @@
 // }}}
 
 // }}} States
-// {{{ factory settings
+// {{{ facdtory settings
 
 #define IF                  69300UL     // in kHz
 #define INITIAL_FREQUENCY   1298200UL   // in kHz    
@@ -109,13 +109,12 @@
 #define INITIAL_MUTELEVEL   10          // scalar
 #define INITIAL_REFERENCE   13000UL     // in kHz
 #define CHANNELSTEP         25          // in kHz
-#define ONEMHZ              1000        // in kHz
+#define LARGESTEP           1000        // in kHz
 #define BANDBOTTOM          1240000UL   // in kHz
 #define BANDTOP             1300000UL   // in kHz
 
 // }}}
 
-#define MEMCHANCOUNT        32          // number of memory channels to save
 #define IF                  69300UL     // in kHz
 #define INITIAL_FREQUENCY   1298200UL   // in kHz    
 #define INITIAL_SHIFT       -28000L     // in kHz
@@ -174,7 +173,7 @@
 #define PD6 6       // (12) not used
 #define PD7 7       // (13) not used
 
-volatile short ports[10];
+short ports[10];
 #define PORTB ports[1]
 #define PORTC ports[2]
 #define PORTD ports[3]
@@ -288,7 +287,54 @@ int32_t ReadPersistent(int index);
 void initPersistentStorage(void);
 #endif
 // }}}
-// {{{ Datastructure definitions
+// {{{ Globals
+
+// {{{ System State variables
+
+volatile int   IRQ_RotaryChange;        // amount of steps to take 
+volatile char  IRQ_SelectorPushed;      // boolean: Pushed = true; Idle = false;
+volatile char  IRQ_Ticks;
+
+int         SS_RotaryCount;
+int         SS_RotaryType;              // int: 0=click per cycle (classic), 1=click per pulse
+char        SS_Tuning;                  // boolean: tuning = true, in menu = false
+char        SS_Transmitting;            // boolean: TX = true, RX = false;
+char        SS_Scanning;                // boolean: scanning = true;
+char        SS_Muted;                   // boolean: TRUE=audio muted, FALSE=audio on 
+char        SS_ShiftChange;             // int: 0=no change, 1 = actived, 2 = deactivated
+char        SS_ShiftEnable;             // boolean: shifted = true;
+char        SS_ReverseShift;            // boolean: swap transmit and receive frequencies = true
+uint32_t    SS_CtcssFrequency;          // the tone value to inject
+int8_t      SS_CtcssIndex;            
+int8_t      SS_BaudrateIndex;            
+uint32_t    SS_Baudrate;
+int         SS_MenuState;               // state of the current user input menu
+int         SS_MenuIndex;               // position in the value lists
+char        SS_MuteIndicator;           // marker to display when audio is muted
+uint8_t     SS_MuteLevel;               // level below which the audio will be muted
+int32_t     SS_FrequencyShift;          // shift value to use during repeater shift
+int32_t     SS_BaseFrequency;           // tuned with the rotary dial. All freqs are derived from this var.
+int32_t     SS_VfoFrequency;            // the frequency to VFO must be tuned to 
+int32_t     SS_DisplayFrequency;        // frequency to show on display
+int16_t     SS_DisplaySMeter;           // value to show on display
+int16_t     SS_SMeterIn;                // value read from the s-meter ADC
+
+char        SS_Selected;
+char        SS_PTT;
+char        SS_TxRxIndicator;
+int32_t     SS_ScanStartFrequency;      // duh...
+int32_t     SS_ScanEndFrequency;        // duh...
+
+char        SS_DirectMenuReturn;        // boolean: if true, direct return to tuning on entering a value
+char        SS_FrontEnable;             // boolean to en/disable the frontpanel switches
+char        SS_RemoteEnable;            // boolean to en/disable the remote control function
+// int   SS_SMeterCalib;
+uint32_t    SS_PllReferenceFrequency;   // frequency that is used as PLL reference
+
+char  SS_ValueEdit;
+
+// }}}  System State variables
+// {{{ Menu
 //
 // Menu's
 //
@@ -321,23 +367,14 @@ struct MenuStruct
     int32_t value;
 };
 
-struct MemoryChannelStruct
-{
-    int32_t  frequency;     // the frequency of this channel
-    int32_t  shift;         // repeater shift (if any) with this channel
-    uint32_t ctcss;         // CTCSS frequency for this repeater (if any) 
-};
-
-// }}}
-// {{{ Constants
-
 // If an extra submenu would be introduced, then you would need to add the following record:
 // { ML_SUB2, <index_of_first_entry>, <index_of_last_entry>, <nr_of_entries> }
 // and off course we need: #define ML_SUB2  2
 
-const struct MenuInfoStruct infoMenu[] = 
+
+struct MenuInfoStruct infoMenu[] = 
 {
-    //    level    start     end          nr of entries (length)
+//    level    start     end          nr of entries (length)
     { ML_MAIN, MAINMENU, MBACK2TUNE , MBACK2TUNE-MAINMENU + 1 },
     { ML_SUB1, SUBMENU1, MABACK2MAIN, MABACK2MAIN-SUBMENU1 + 1 }    // for now, skip factory reset
 };
@@ -351,12 +388,12 @@ struct MenuStruct theMenu[] =
 {
     { "Mute Level"    , ML_MAIN, 0, MD_INT , "%s%2d"           , INITIAL_MUTELEVEL   },    // 00
 #ifdef TESTING
-    { "Shift"         , ML_MAIN, 1, MD_INT , "%s%4d.%03u MHz"  , INITIAL_SHIFT       },    // 01
+    { "Shift"         , ML_MAIN, 1, MD_INT , "%s%4d.%03d MHz"  , INITIAL_SHIFT       },    // 01
     { "CTCSS"         , ML_MAIN, 2, MD_INT , "%s%3u.%1u Hz"    , INITIAL_CTCSS       },    // 02
     { "Scan Start"    , ML_MAIN, 3, MD_INT , "%s%4u.%03u MHz"  , BANDBOTTOM          },    // 03
     { "Scan End"      , ML_MAIN, 4, MD_INT , "%s%4u.%03u MHz"  , BANDTOP             },    // 04
 #else
-    { "Shift"         , ML_MAIN, 1, MD_INT , "%s%4ld.%03lu MHz", INITIAL_SHIFT       },    // 01
+    { "Shift"         , ML_MAIN, 1, MD_INT , "%s%4ld.%03ld MHz", INITIAL_SHIFT       },    // 01
     { "CTCSS"         , ML_MAIN, 2, MD_INT , "%s%3u.%1u Hz"    , INITIAL_CTCSS       },    // 02
     { "Scan Start"    , ML_MAIN, 3, MD_INT , "%s%4lu.%03lu MHz", BANDBOTTOM          },    // 03
     { "Scan End"      , ML_MAIN, 4, MD_INT , "%s%4lu.%03lu MHz", BANDTOP             },    // 04
@@ -381,82 +418,10 @@ struct MenuStruct theMenu[] =
     { "Factory reset" , ML_SUB1, 8, MD_NONE, "%s%s"            , 0                   },    // 17 "value" unused
 };
 
-// define S-meter chars
-const unsigned char smeter[3][8] = {
-    {0b00000,0b00000,0b10000,0b10000,0b10000,0b10000,0b00000,0b00000},
-    {0b00000,0b00000,0b10100,0b10100,0b10100,0b10100,0b00000,0b00000},
-    {0b00000,0b00000,0b10101,0b10101,0b10101,0b10101,0b00000,0b00000}
-};
-
-//CTCSS frequencies
-const uint16_t CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
-    1000,1035,1072,1109,1148,1188,1230,1273,1318,1365,1413,1462,1514,1567,1598,
-    1622,1655,1679,1713,1738,1773,1799,1835,1862,1899,1928,1966,1995,2035,2065,
-    2107,2181,2257,2291,2336,2418,2503,2541, -1
-};
-
-// uint8_t ctcssIndex;
-const uint8_t ctcssLength = (sizeof(CtcssTones)/sizeof(uint16_t))-2;
-
-uint32_t Baudrates[] = { 1200, 2400, 4800, 9600, 19200, 38400, 76800, 115600 };
-uint8_t baudrateLength = 8 - 1;
-
-// }}} /end constants
-// {{{ Globals
-    static int8_t stepsCounter;
-
-// {{{ System State variables
-
-volatile int        IRQ_RotaryChange;   // amount of steps to take 
-volatile char       IRQ_SelectorPushed; // boolean: Pushed = true; Idle = false;
-volatile uint32_t   IRQ_Ticks;          // one timer tick roughly every 10 ms.
-
-int         SS_RotaryCount;
-int         SS_RotaryType;              // int: 0=click per cycle (classic), 1=click per pulse
-char        SS_Tuning;                  // boolean: tuning = true, in menu = false
-char        SS_FastTune;                // boolean: tune steps per MHz when true
-char        SS_MemoryChannel;           // boolean: step through the memory channels when true;
-char        SS_Transmitting;            // boolean: TX = true, RX = false;
-char        SS_Scanning;                // boolean: scanning = true;
-char        SS_Muted;                   // boolean: TRUE=audio muted, FALSE=audio on 
-char        SS_ShiftChange;             // int: 0=no change, 1 = actived, 2 = deactivated
-char        SS_ShiftEnable;             // boolean: shifted = true;
-char        SS_ReverseShift;            // boolean: swap transmit and receive frequencies = true
-uint32_t    SS_CtcssFrequency;          // the tone value to inject
-int8_t      SS_CtcssIndex;            
-int8_t      SS_BaudrateIndex;            
-uint32_t    SS_Baudrate;
-int         SS_MenuState;               // state of the current user input menu
-int         SS_MenuIndex;               // position in the value lists
-char        SS_MuteIndicator;           // marker to display when audio is muted
-int8_t      SS_MuteLevel;               // level below which the audio will be muted
-int32_t     SS_FrequencyShift;          // shift value to use during repeater shift
-int32_t     SS_BaseFrequency;           // tuned with the rotary dial. All freqs are derived from this var.
-int32_t     SS_VfoFrequency;            // the frequency to VFO must be tuned to 
-int32_t     SS_DisplayFrequency;        // frequency to show on display
-int16_t     SS_DisplaySMeter;           // value to show on display
-int16_t     SS_SMeterIn;                // value read from the s-meter ADC
-
-char        SS_Selected;
-char        SS_PTT;
-char        SS_TxRxIndicator;
-char        SS_TuneIndicator;           // boolean: shows when we are in large step (fast) tuning mode
-int32_t     SS_ScanStartFrequency;      // duh...
-int32_t     SS_ScanEndFrequency;        // duh...
-
-char        SS_DirectMenuReturn;        // boolean: if true, direct return to tuning on entering a value
-char        SS_FrontEnable;             // boolean to en/disable the frontpanel switches
-char        SS_RemoteEnable;            // boolean to en/disable the remote control function
-// int   SS_SMeterCalib;
-uint32_t    SS_PllReferenceFrequency;   // frequency that is used as PLL reference
-
-char  SS_ValueEdit;
-
-struct MemoryChannelStruct memory[MEMCHANCOUNT];
-
-// }}}  System State variables
+// }}}
 
 #ifdef TESTING
+clock_t now;
 char  tmpFreqChanged=FALSE;
 char  tmpFreqSaved=FALSE;
 char  AutoTest=FALSE;        // set to true via commandline when automated testing is in order
@@ -466,10 +431,10 @@ short LoopCounter;           // tmp global
 short cpos;                  // display: lineair cursor position
 #endif
 
-uint32_t currentTime;        // tmp global
-uint32_t prevStepTime;       // tells scanner when it is time for the next channel
-uint32_t lastFrequencyChange;// keeps track of time since last tuning action
-uint32_t stepTime;           // time between tuning steps
+uint16_t currentTime;        // tmp global
+uint16_t prevStepTime;       // tells scanner when it is time for the next channel
+uint16_t goStep;
+uint32_t lastFrequencyChange;   // keeps track of time since last tuning action
 uint16_t TimerValue;         // value to program in the timer
 
 char GClkPrev;               // used for rotary dial handling
@@ -477,10 +442,29 @@ char GClkPrev;               // used for rotary dial handling
 uint16_t LowPass;            // Variable for S-meter lowpass filter
 char  IntRotLines;           // remember status of rotary switch inputs
 
+
 int32_t prevFreq;            // used to determine if the freq display needs updating
 
-char  LineT[DISPLAY_WIDTH+5]; // top display line + 5 bytes reserve
-char  LineB[DISPLAY_WIDTH+5]; // bottom display line
+char  Line[DISPLAY_WIDTH+10];
+
+// define S-meter chars
+unsigned char smeter[3][8] = {
+    {0b00000,0b00000,0b10000,0b10000,0b10000,0b10000,0b00000,0b00000},
+    {0b00000,0b00000,0b10100,0b10100,0b10100,0b10100,0b00000,0b00000},
+    {0b00000,0b00000,0b10101,0b10101,0b10101,0b10101,0b00000,0b00000}
+};
+
+//CTCSS frequencies
+uint16_t CtcssTones[] = {   0, 670, 689, 693, 710, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974,
+    1000,1035,1072,1109,1148,1188,1230,1273,1318,1365,1413,1462,1514,1567,1598,
+    1622,1655,1679,1713,1738,1773,1799,1835,1862,1899,1928,1966,1995,2035,2065,
+    2107,2181,2257,2291,2336,2418,2503,2541, -1
+};
+// uint8_t ctcssIndex;
+uint8_t ctcssLength = (sizeof(CtcssTones)/sizeof(uint16_t))-2;
+
+uint32_t Baudrates[] = { 1200, 2400, 4800, 9600, 19200, 38400, 76800, 115600 };
+uint8_t baudrateLength = 8 - 1;
 
 #ifdef TESTING
 // short  theMainEvent;
@@ -598,7 +582,7 @@ ISR(INT0_vect)
 
 ISR(TIMER1_OVF_vect) 
 { 
-    IRQ_Ticks+=2;              // increment tick for freq save timeout
+    IRQ_Ticks++;              // increment tick for freq save timeout
     // restart timer
     TCNT1 = 65536-TimerValue;  
     if (SS_Transmitting && (SS_CtcssIndex != 0))
@@ -724,9 +708,8 @@ void initLCD(void)
     _delay_ms(40);
 
     //              0123456789ABCDEF
-    char hello[] = "PA3BJI sw v0.6  ";
+    char hello[] = "PA3BJI sw v0.5  ";
     lcdStr16(hello);
-    _delay_ms(500);
 }
 
 
@@ -825,8 +808,6 @@ void readPersistentStorage(void)
         fread((int32_t *)&theMenu[(int)i].value,1,sizeof(int32_t), eeprom);
     }
 #else
-
-#if 0
     theMenu[(int)0x00].value = eeprom_read_dword((uint32_t *) (0x00*sizeof(uint32_t)));
     theMenu[(int)0x01].value = eeprom_read_dword((uint32_t *) (0x01*sizeof(uint32_t)));
     theMenu[(int)0x02].value = eeprom_read_dword((uint32_t *) (0x02*sizeof(uint32_t)));
@@ -843,13 +824,6 @@ void readPersistentStorage(void)
     theMenu[(int)0x0D].value = eeprom_read_dword((uint32_t *) (0x0D*sizeof(uint32_t)));
     theMenu[(int)0x0E].value = eeprom_read_dword((uint32_t *) (0x0E*sizeof(uint32_t)));
     theMenu[(int)0x0F].value = eeprom_read_dword((uint32_t *) (0x0F*sizeof(uint32_t)));
-#else
-    uint8_t i;
-    for (i=0; i<16; i++)
-    {
-        theMenu[i].value = eeprom_read_dword((uint32_t *)(i*sizeof(uint32_t)));
-    }
-#endif
 #endif
 
 #define inbetween(v, a, b) (!((v < a) || (v > b)))
@@ -871,10 +845,6 @@ void readPersistentStorage(void)
         theMenu[MSHIFT].value = SS_FrequencyShift;
         eeprom_write_dword((uint32_t *)(MSHIFT*sizeof(uint32_t)), theMenu[MSHIFT].value);
     }
-    // round up to full MHz
-    SS_FrequencyShift /= 1000;
-    SS_FrequencyShift *= 1000;
-    theMenu[MSHIFT].value = SS_FrequencyShift;
 
     SS_CtcssIndex = (uint8_t)theMenu[MCTCSS].value;
     // integrity checking
@@ -931,7 +901,7 @@ void readPersistentStorage(void)
         theMenu[MAROTARYTYPE].value = SS_RotaryType;
         eeprom_write_dword((uint32_t *)(MAROTARYTYPE*sizeof(uint32_t)), theMenu[MAROTARYTYPE].value);
     }
-
+     
     SS_PllReferenceFrequency = theMenu[MAPLLREFMHZ].value;
     // integrity checking
     if (!inbetween(SS_PllReferenceFrequency, 5000UL, 150000UL))
@@ -944,25 +914,6 @@ void readPersistentStorage(void)
 }
 
 // }}}
-
-
-uint32_t sysClock(void)
-{
-    register uint32_t rv;
-#ifdef TESTING
-    // posix clock works in uS
-    // dividing by 10000 converts to centiseconds
-    rv = clock() / 10000L;
-#else
-    // Atmel timer setup uses approximate centiseconds
-    ATOMIC_BLOCK(ATOMIC_FORCEON)
-    {
-        rv = IRQ_Ticks;
-    }
-#endif
-    return rv;
-}
-
 // {{{ void initialize(void)
 
 void initialize(void)
@@ -971,7 +922,7 @@ void initialize(void)
     // its very sure the 5v power line is stable
     _delay_ms(100);
 
-    // We need to know about hardware config before running hw init 
+    // We need to know about hardware config before hw init 
 #ifdef TESTING
     initPersistentStorage();
 #endif
@@ -993,7 +944,6 @@ void initialize(void)
     SS_MenuState            = MAINMENU;
     SS_ValueEdit            = FALSE;
     SS_Tuning               = TRUE;
-    SS_FastTune             = FALSE;
     IRQ_SelectorPushed      = FALSE;
     IRQ_RotaryChange        = 0;
     IRQ_Ticks               = 0;
@@ -1027,7 +977,7 @@ void initialize(void)
 
 void ttySetCursorPosition(short row, short col)
 {
-    printf("\033[%d;%df",row+1, col+1);
+    if (!AutoTest) printf("\033[%d;%df",row+1, col+1);
 }
 
 // }}}
@@ -1035,8 +985,11 @@ void ttySetCursorPosition(short row, short col)
 
 void ttyClearScreen(void)
 {
-    printf("\033[2J");
-    printf("\033[?1h");
+    if (!AutoTest)
+    {
+        printf("\033[2J");
+        printf("\033[?1h");
+    }
 }
 
 // }}}
@@ -1047,7 +1000,7 @@ void ttyClearScreen(void)
 void NL(void)
 {
     printf("\n"); 
-    printf ("\r");
+    if (!AutoTest) printf ("\r");
 }
 
 // {{{ deSetCursorPosition(short row, short col)
@@ -1142,20 +1095,23 @@ void deFrame(void)
 {
     short y;
 
-    // cursor off
-    printf("\033[?25l");   
-
-    deSetCursorPosition(-1, -1);
-    deLine(DISPLAY_WIDTH+1);
-    for (y=0; y<DISPLAY_HEIGHT; y++)
+    if (!AutoTest)
     {
-        deSetCursorPosition(y, -1);
-        printf("|");
-        deSetCursorPosition(y,DISPLAY_WIDTH);
-        printf("|");
+        // cursor off
+        printf("\033[?25l");   
+
+        deSetCursorPosition(-1, -1);
+        deLine(DISPLAY_WIDTH+1);
+        for (y=0; y<DISPLAY_HEIGHT; y++)
+        {
+            deSetCursorPosition(y, -1);
+            printf("|");
+            deSetCursorPosition(y,DISPLAY_WIDTH);
+            printf("|");
+        }
+        deSetCursorPosition(DISPLAY_HEIGHT, -1);
+        deLine(DISPLAY_WIDTH+1);
     }
-    deSetCursorPosition(DISPLAY_HEIGHT, -1);
-    deLine(DISPLAY_WIDTH+1);
 }
 
 // }}}
@@ -1165,11 +1121,16 @@ void deFrame(void)
 
 char* yesno(short boolean)
 {
+    static char ayes[]="yes";
+    static char ano[] =" no";
     // green -> light gray
     static char myes[]="\033[32myes\033[37m";
     // red -> light gray
     static char mno[] ="\033[31m no\033[37m";
-    return (boolean ? myes : mno); 
+    if (AutoTest)
+        return (boolean ? ayes : ano); 
+    else
+        return (boolean ? myes : mno); 
 }
 
 // }}}
@@ -1395,7 +1356,7 @@ uint16_t InputGetSMeter(void)
     static int delay;
     static char rising;
     static int hoog=980;
-    static int laag=980-84;   // = 896 as lowest value 
+    static int laag=980-84;
 
     if (SS_Tuning && (delay++ > 320))
     {
@@ -1505,357 +1466,310 @@ void RemoteControlHandler(void)
 }
 
 // }}}
-// {{{ Processing Handler
+// {{{ void ProcessingHandler(void)
 
-// {{{ void ProcTuning(void)
-
-void ProcTuning(void)
+void ProcessingHandler(void)
 {
+    // {{{ // Rotary Handling
 
-    if (SS_RotaryCount != 0)
+    // {{{ Tuning
+
+    // Tuning is only allowed during receive
+    if ((!SS_Transmitting) & SS_Tuning)
     {
-        currentTime = sysClock();
-        stepTime = currentTime - lastFrequencyChange;
-        // when the tuning steps have been arriving faster 
-        // then 100 ms for 5 steps, start taking large steps
-        // timekeeping is done in approximate centi-seconds 
-        if (stepTime  < 10) 
+        if (SS_RotaryCount != 0)
         {
-            stepsCounter++;
-            if (stepsCounter > 5)
-            {
-                SS_FastTune = TRUE;
-                stepsCounter = 5;
-            }
-        }
-
-        // if tuning slows down, fall back to 
-        // small steps after 3 slow tunes
-        if ((currentTime-lastFrequencyChange) > 15) 
-        {
-            stepsCounter--;
-            if (stepsCounter < 0) 
-            {
-                SS_FastTune = FALSE;
-                stepsCounter = 0;
-            }
-        }
-
-        // Handle the tune pulses
-        if (SS_FastTune)
-            SS_BaseFrequency += (SS_RotaryCount * ONEMHZ);
-        else
-            SS_BaseFrequency += (SS_RotaryCount * CHANNELSTEP);
-        SS_RotaryCount = 0;
-
-        // make sure we're in-band
-        if (SS_BaseFrequency < BANDBOTTOM)
-            SS_BaseFrequency = BANDBOTTOM;
-        if (SS_BaseFrequency > BANDTOP)
-            SS_BaseFrequency = BANDTOP;
-
-        lastFrequencyChange = sysClock();
+            SS_BaseFrequency += SS_RotaryCount * CHANNELSTEP;
+            SS_RotaryCount = 0;
+            lastFrequencyChange = IRQ_Ticks;
 #ifdef TESTING
-        tmpFreqChanged = TRUE;  // only for debug
-        tmpFreqSaved  = FALSE;  // only for debug
+            tmpFreqChanged = TRUE;
+            tmpFreqSaved  = FALSE;
+            lastFrequencyChange = clock();
 #endif
-    } else
-    {
-        // if tuning stopped for a full second, 
-        // go back to small steps again
-        if (SS_FastTune)
-        {
-            currentTime = sysClock();
-            stepTime = currentTime - lastFrequencyChange;
-
-            if (stepTime > 40) 
-            {
-                SS_FastTune = FALSE;
-                stepsCounter = 0;
-            }
         }
-    }
-
-    SS_TuneIndicator = (SS_FastTune) ? 'f' : ' ';
-}
-
-// }}}
-// {{{ void ProcTuneSave(void)
-
-void ProcTuneSave(void)
-{
-    if ((sysClock() - lastFrequencyChange) > 100) //  ~ 2 sec
-    {
-        SS_FastTune = FALSE; // just to be sure
-        theMenu[5].value = SS_BaseFrequency;
-        // position 5 is not used for regular menu value storage
+    } 
 #ifdef TESTING
+    now = clock();
+    if ((now - lastFrequencyChange) > 1000000L) // 1 mil usecs ~ 2 sec
+    {
+        theMenu[5].value = SS_BaseFrequency;
+        // position 5 is not used for regular value storage
+        // eeprom_write_dword(5, theMenu[5].value);
         tmpFreqChanged = FALSE;
         tmpFreqSaved = TRUE;
-#else
-        eeprom_update_dword((uint32_t *)(5*sizeof(uint32_t)), theMenu[5].value);
-#endif
     }
-}
+#else
+    currentTime = IRQ_Ticks;
+    if ((currentTime - lastFrequencyChange) > 200) //  ~ 2 sec
+    {
+        theMenu[5].value = SS_BaseFrequency;
+        // position 5 is not used for regular value storage
+        eeprom_update_dword((uint32_t *)(5*sizeof(uint32_t)), theMenu[5].value);
+    }
+#endif
 
-// }}}
-// {{{ void ProcMenuScrolling(void)
+    // }}}
+    // {{{ Menu scrolling
 
-void ProcMenuScrolling(void)
-{
     int8_t start;
     int8_t length;
     int8_t level;
     int8_t tmp;
-
-    // scrolling through menu
-    if (SS_RotaryCount != 0)
-    { 
-        level  = theMenu[SS_MenuState].level;
-        start  = infoMenu[level].start;
-        length = infoMenu[level].length;
-
-        // f(x) = (( x – start + Nsteps ) % length ) + start
-        tmp = SS_MenuState - start + SS_RotaryCount;
-        SS_MenuState = tmp % length;
-        if (SS_MenuState < 0) 
-            SS_MenuState += length; // necesary because the % operator may return negative results
-        SS_MenuState += start;
-        SS_RotaryCount = 0;
-    }
-}
-
-// }}}
-// {{{ void ProcValueEditing(void)
-
-void ProcValueEditing(void)
-{
     uint32_t kHz;
 
+    // scrolling through menu
+    if (!SS_Tuning && !SS_ValueEdit)
+    {
+        if (SS_RotaryCount != 0)
+        { 
+            level  = theMenu[SS_MenuState].level;
+            start  = infoMenu[level].start;
+            length = infoMenu[level].length;
+
+            // f(x) = (( x – start + Nsteps ) % length ) + start
+            tmp = SS_MenuState - start + SS_RotaryCount;
+            SS_MenuState = tmp % length;
+            if (SS_MenuState < 0) 
+                SS_MenuState += length; // necesary because the % operator may return negative results
+            SS_MenuState += start;
+            SS_RotaryCount = 0;
+        }
+    }
+
     // editing values
-    if (SS_RotaryCount != 0)
-    { 
+    if (!SS_Tuning && SS_ValueEdit)
+    {
+        if (SS_RotaryCount != 0)
+        { 
+            switch (SS_MenuState)
+            {
+                case MMUTELEVEL :
+                    SS_MuteLevel+= SS_RotaryCount;
+                    if (SS_MuteLevel > MAXMUTELEVEL) SS_MuteLevel = MAXMUTELEVEL;
+                    if (SS_MuteLevel < 0)            SS_MuteLevel = 0;
+                    theMenu[SS_MenuState].value    = SS_MuteLevel;
+                    break;
+
+                case MSHIFT :
+                    SS_FrequencyShift += (SS_RotaryCount*1000);
+                    if (SS_FrequencyShift > MAXSHIFT) SS_FrequencyShift = MAXSHIFT;
+                    if (SS_FrequencyShift < MINSHIFT) SS_FrequencyShift = MINSHIFT;
+                    theMenu[SS_MenuState].value     = SS_FrequencyShift;                
+                    break;
+
+                case MCTCSS :
+                    SS_CtcssIndex += SS_RotaryCount;
+                    if (SS_CtcssIndex < 0) SS_CtcssIndex = 0;
+                    if (SS_CtcssIndex > ctcssLength) SS_CtcssIndex = ctcssLength;
+
+                    theMenu[SS_MenuState].value = (int32_t)SS_CtcssIndex;
+                    SS_CtcssFrequency = CtcssTones[SS_CtcssIndex];
+                    break;
+
+                case MSSTART :
+                    SS_ScanStartFrequency += (SS_RotaryCount * CHANNELSTEP);
+                    if (SS_ScanStartFrequency < BANDBOTTOM) SS_ScanStartFrequency = BANDBOTTOM;
+                    if (SS_ScanStartFrequency > SS_ScanEndFrequency) SS_ScanStartFrequency = SS_ScanEndFrequency;
+                    theMenu[SS_MenuState].value = SS_ScanStartFrequency;
+                    break;
+
+                case MSEND :
+                    SS_ScanEndFrequency += (SS_RotaryCount * CHANNELSTEP);
+                    if (SS_ScanEndFrequency < SS_ScanStartFrequency) SS_ScanEndFrequency = SS_ScanStartFrequency;
+                    if (SS_ScanEndFrequency > BANDTOP)    SS_ScanEndFrequency = BANDTOP;
+                    theMenu[SS_MenuState].value = SS_ScanEndFrequency;
+                    break;
+
+                case MARETURNMODE :
+                    SS_RotaryCount = SS_RotaryCount % 2;
+                    SS_DirectMenuReturn = (SS_RotaryCount==1) ? TRUE : FALSE;
+                    theMenu[SS_MenuState].value = SS_DirectMenuReturn;
+                    break;
+                    /*
+                       case MASMCALIB :
+                       SS_SMeterCalib += SS_RotaryCount;
+                       break;
+                     */
+                    // ADF4113HV   Fref = 5 .. 150 MHz
+                case MAPLLREFMHZ :
+                    SS_PllReferenceFrequency += SS_RotaryCount * 1000;
+                    if (SS_PllReferenceFrequency <   5000UL) SS_PllReferenceFrequency =   5000UL;
+                    if (SS_PllReferenceFrequency > 150000UL) SS_PllReferenceFrequency = 150000UL;
+                    theMenu[SS_MenuState  ].value = SS_PllReferenceFrequency;
+                    theMenu[SS_MenuState+1].value = SS_PllReferenceFrequency;
+                    break;
+
+                case MAPLLREFKHZ :
+                    kHz = SS_PllReferenceFrequency;
+                    kHz += SS_RotaryCount;
+                    kHz = kHz % 1000;                   // Stay in the kHz range
+                    SS_PllReferenceFrequency /= 1000;   // Integer devide by 1000, followed by...
+                    SS_PllReferenceFrequency *= 1000;   // multiply by 1000 to set the lower 3 digits to 0
+                    SS_PllReferenceFrequency += kHz;    // Now add in the kHz value.
+                    theMenu[SS_MenuState  ].value = SS_PllReferenceFrequency;
+                    theMenu[SS_MenuState-1].value = SS_PllReferenceFrequency;
+                    break;
+
+                case MABAUDRATE :
+                    SS_BaudrateIndex += SS_RotaryCount;
+                    if (SS_BaudrateIndex < 0) SS_BaudrateIndex = 0;
+                    if (SS_BaudrateIndex > baudrateLength) SS_BaudrateIndex = baudrateLength;
+
+                    theMenu[SS_MenuState].value = (int32_t)SS_BaudrateIndex;
+                    SS_Baudrate = Baudrates[SS_BaudrateIndex];
+                    break;
+
+                case MAROTARYTYPE :
+                    SS_RotaryType += SS_RotaryCount;
+                    if (SS_RotaryType < 0) SS_RotaryType = 0;
+                    if (SS_RotaryType > 1) SS_RotaryType = 1;
+                    theMenu[SS_MenuState].value = (int32_t)SS_RotaryType;
+                    break;
+
+                case MAREMOTEENABLE:
+                    SS_RotaryCount = SS_RotaryCount % 2;
+                    SS_RemoteEnable = (SS_RotaryCount==1) ? TRUE : FALSE;
+                    theMenu[SS_MenuState].value = SS_RemoteEnable;
+                    break;
+
+                case MAFRONTENABLE :
+                    SS_RotaryCount = SS_RotaryCount % 2;
+                    SS_FrontEnable = (SS_RotaryCount==1) ? TRUE : FALSE;
+                    theMenu[SS_MenuState].value = SS_FrontEnable;
+                    break;
+            }
+            // swallow the rotary pulses used
+            SS_RotaryCount = 0;
+        } 
+    }
+
+    // }}}
+
+    // }}}
+    // {{{ // Selector Button
+
+    // {{{ Select pushed during tuning
+
+    if (SS_Selected && SS_Tuning && !SS_Transmitting)
+    {
+        SS_Selected = FALSE;            // swallow the selection action
+
+        // handle the selector button pushed
+        SS_Selected = FALSE;        // swallow the selection action
+        SS_MenuState = MAINMENU;    // always start here
+        SS_Tuning   = FALSE;        // rotary input now goes to menu
+        SS_Scanning = FALSE;        // stop scanning on entering menu
+        SS_ValueEdit= FALSE;
+    }
+
+    // }}}
+    // {{{ Select pushed during Menu browing 
+
+    if (SS_Selected && !SS_Tuning && !SS_ValueEdit) 
+    {
+        // here we are already in menu handling mode
+        SS_Selected = FALSE;        // swallow the selection action
+        switch (SS_MenuState)
+        {
+            case MBACK2TUNE :
+                SS_Tuning = TRUE;   // switch to tuning mode
+                prevFreq = 0L;      // force update of freq dispaly
+                break;
+
+            case MABACK2MAIN :
+                SS_MenuState = MAINMENU;
+                break;
+
+            case MSCAN :
+                SS_Tuning = TRUE;   // switch to tuning mode
+                SS_Scanning = TRUE; // and go to scanning mode
+                prevFreq = 0L;      // force update of freq display
+                break;
+
+            case MSETTINGS :        // Goto the first submenu
+                SS_MenuState = SUBMENU1;
+                break;
+
+            default :  
+                SS_ValueEdit = TRUE;
+        }
+    }
+
+    // }}}
+    // {{{  Select pushed during Value editing
+
+    if (SS_Selected && !SS_Tuning && SS_ValueEdit) 
+    {
+        SS_Selected = FALSE;        // swallow the selection action
+
+        // here we are already in menu handling mode AND editing values
+        if (!SS_Tuning && SS_ValueEdit) 
+        {
+            SS_ValueEdit = FALSE;   // return from value editing
+            SS_Tuning = SS_DirectMenuReturn;
+            prevFreq = 0L;          // force update of freq display
+            // and write value to persistent memory
+            // need to write proper persistent storage routine for that
+        }
         switch (SS_MenuState)
         {
             case MMUTELEVEL :
-                SS_MuteLevel+= SS_RotaryCount;
-                if (SS_MuteLevel > MAXMUTELEVEL) SS_MuteLevel = MAXMUTELEVEL;
-                if (SS_MuteLevel < 0)            SS_MuteLevel = 0;
-                theMenu[SS_MenuState].value    = SS_MuteLevel;
+                SS_MuteLevel = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MMUTELEVEL*sizeof(uint32_t)),theMenu[MMUTELEVEL].value);
                 break;
 
             case MSHIFT :
-                SS_FrequencyShift += (SS_RotaryCount*1000);
-                if (SS_FrequencyShift > MAXSHIFT) SS_FrequencyShift = MAXSHIFT;
-                if (SS_FrequencyShift < MINSHIFT) SS_FrequencyShift = MINSHIFT;
-                theMenu[SS_MenuState].value     = SS_FrequencyShift;                
+                SS_FrequencyShift = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MSHIFT*sizeof(uint32_t)) ,theMenu[MSHIFT].value);
                 break;
 
-            case MCTCSS :
-                SS_CtcssIndex += SS_RotaryCount;
-                if (SS_CtcssIndex < 0) SS_CtcssIndex = 0;
-                if (SS_CtcssIndex > ctcssLength) SS_CtcssIndex = ctcssLength;
-
-                theMenu[SS_MenuState].value = (int32_t)SS_CtcssIndex;
+            case MCTCSS:
+                SS_CtcssIndex = theMenu[SS_MenuState].value;
                 SS_CtcssFrequency = CtcssTones[SS_CtcssIndex];
+                TimerValue = 5*F_CPU/SS_CtcssFrequency; // *10/2
+                eeprom_write_dword((uint32_t *)(MCTCSS*sizeof(uint32_t)),theMenu[MCTCSS].value);
                 break;
 
             case MSSTART :
-                SS_ScanStartFrequency += (SS_RotaryCount * CHANNELSTEP);
-                if (SS_ScanStartFrequency < BANDBOTTOM) SS_ScanStartFrequency = BANDBOTTOM;
-                if (SS_ScanStartFrequency > SS_ScanEndFrequency) SS_ScanStartFrequency = SS_ScanEndFrequency;
-                theMenu[SS_MenuState].value = SS_ScanStartFrequency;
+                SS_ScanStartFrequency = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MSSTART*sizeof(uint32_t)) ,theMenu[MSSTART].value);
                 break;
 
             case MSEND :
-                SS_ScanEndFrequency += (SS_RotaryCount * CHANNELSTEP);
-                if (SS_ScanEndFrequency < SS_ScanStartFrequency) SS_ScanEndFrequency = SS_ScanStartFrequency;
-                if (SS_ScanEndFrequency > BANDTOP)    SS_ScanEndFrequency = BANDTOP;
-                theMenu[SS_MenuState].value = SS_ScanEndFrequency;
-                break;
-
-            case MARETURNMODE :
-                SS_RotaryCount = SS_RotaryCount % 2;
-                SS_DirectMenuReturn = (SS_RotaryCount==1) ? TRUE : FALSE;
-                theMenu[SS_MenuState].value = SS_DirectMenuReturn;
-                break;
-                /*
-                   case MASMCALIB :
-                   SS_SMeterCalib += SS_RotaryCount;
-                   break;
-                 */
-                // ADF4113HV   Fref = 5 .. 150 MHz
-            case MAPLLREFMHZ :
-                SS_PllReferenceFrequency += SS_RotaryCount * 1000;
-                if (SS_PllReferenceFrequency <   5000UL) SS_PllReferenceFrequency =   5000UL;
-                if (SS_PllReferenceFrequency > 150000UL) SS_PllReferenceFrequency = 150000UL;
-                theMenu[SS_MenuState  ].value = SS_PllReferenceFrequency;
-                theMenu[SS_MenuState+1].value = SS_PllReferenceFrequency;
-                break;
-
-            case MAPLLREFKHZ :
-                kHz = SS_PllReferenceFrequency;
-                kHz += SS_RotaryCount;
-                kHz = kHz % 1000;                   // Stay in the kHz range
-                SS_PllReferenceFrequency /= 1000;   // Integer devide by 1000, followed by...
-                SS_PllReferenceFrequency *= 1000;   // multiply by 1000 to set the lower 3 digits to 0
-                SS_PllReferenceFrequency += kHz;    // Now add in the kHz value.
-                theMenu[SS_MenuState  ].value = SS_PllReferenceFrequency;
-                theMenu[SS_MenuState-1].value = SS_PllReferenceFrequency;
+                SS_ScanEndFrequency= theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MSEND*sizeof(uint32_t)) ,theMenu[MSEND].value);
                 break;
 
             case MABAUDRATE :
-                SS_BaudrateIndex += SS_RotaryCount;
-                if (SS_BaudrateIndex < 0) SS_BaudrateIndex = 0;
-                if (SS_BaudrateIndex > baudrateLength) SS_BaudrateIndex = baudrateLength;
-
-                theMenu[SS_MenuState].value = (int32_t)SS_BaudrateIndex;
-                SS_Baudrate = Baudrates[SS_BaudrateIndex];
+                SS_BaudrateIndex = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MABAUDRATE*sizeof(uint32_t)) ,theMenu[MABAUDRATE ].value);
                 break;
 
             case MAROTARYTYPE :
-                SS_RotaryType += SS_RotaryCount;
-                if (SS_RotaryType < 0) SS_RotaryType = 0;
-                if (SS_RotaryType > 1) SS_RotaryType = 1;
-                theMenu[SS_MenuState].value = (int32_t)SS_RotaryType;
-                break;
-
-            case MAREMOTEENABLE:
-                SS_RotaryCount = SS_RotaryCount % 2;
-                SS_RemoteEnable = (SS_RotaryCount==1) ? TRUE : FALSE;
-                theMenu[SS_MenuState].value = SS_RemoteEnable;
+                SS_RotaryType = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MAROTARYTYPE*sizeof(uint32_t)) ,theMenu[MAROTARYTYPE].value);
+                // reset the rotary input system
                 break;
 
             case MAFRONTENABLE :
-                SS_RotaryCount = SS_RotaryCount % 2;
-                SS_FrontEnable = (SS_RotaryCount==1) ? TRUE : FALSE;
-                theMenu[SS_MenuState].value = SS_FrontEnable;
+                SS_FrontEnable = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MAFRONTENABLE*sizeof(uint32_t)),theMenu[MAFRONTENABLE].value);
+                break;
+
+            case MAREMOTEENABLE :
+                SS_RemoteEnable = theMenu[SS_MenuState].value;
+                eeprom_write_dword((uint32_t *)(MAREMOTEENABLE*sizeof(uint32_t)),theMenu[MAREMOTEENABLE].value);
                 break;
         }
-        // swallow the rotary pulses used
-        SS_RotaryCount = 0;
-    } 
-}
-
-// }}}
-
-// {{{ Select pushed during tuning
-
-void ProcSelectDuringTune(void)
-{
-    // handle the selector button pushed
-    SS_Selected = FALSE;        // swallow the selection action
-    SS_MenuState = MAINMENU;    // always start here
-    SS_Tuning   = FALSE;        // rotary input now goes to menu
-    SS_Scanning = FALSE;        // stop scanning on entering menu
-    SS_ValueEdit= FALSE;
-}
-
-// }}}
-// {{{ Select pushed during Menu browing 
-
-void ProcSelectDuringMenu(void)
-{
-    // here we are already in menu handling mode
-    SS_Selected = FALSE;        // swallow the selection action
-    switch (SS_MenuState)
-    {
-        case MBACK2TUNE :
-            SS_Tuning = TRUE;   // switch to tuning mode
-            prevFreq = 0L;      // force update of freq dispaly
-            break;
-
-        case MABACK2MAIN :
-            SS_MenuState = MAINMENU;
-            break;
-
-        case MSCAN :
-            SS_Tuning = TRUE;   // switch to tuning mode
-            SS_Scanning = TRUE; // and go to scanning mode
-            prevFreq = 0L;      // force update of freq display
-            break;
-
-        case MSETTINGS :        // Goto the first submenu
-            SS_MenuState = SUBMENU1;
-            break;
-
-        default :  
-            SS_ValueEdit = TRUE;
     }
-}
 
-// }}}
-// {{{  Select pushed during Value editing
+    // }}}
 
-void ProcSelectDuringEdit(void)
-{
-    // here we are already in menu handling mode AND editing values
-    if (!SS_Tuning && SS_ValueEdit) 
-    {
-        SS_ValueEdit = FALSE;   // return from value editing
-        SS_Tuning = SS_DirectMenuReturn;
-        prevFreq = 0L;          // force update of freq display
-        // and write value to persistent memory
-        // need to write proper persistent storage routine for that
-    }
-    switch (SS_MenuState)
-    {
-        case MMUTELEVEL :
-            SS_MuteLevel = theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MMUTELEVEL*sizeof(uint32_t)),theMenu[MMUTELEVEL].value);
-            break;
+    // }}} end selector button
 
-        case MSHIFT :
-            SS_FrequencyShift = theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MSHIFT*sizeof(uint32_t)) ,theMenu[MSHIFT].value);
-            break;
+    // {{{ // Push To Talk
 
-        case MCTCSS:
-            SS_CtcssIndex = theMenu[SS_MenuState].value;
-            SS_CtcssFrequency = CtcssTones[SS_CtcssIndex];
-            TimerValue = 5*F_CPU/SS_CtcssFrequency; // *10/2
-            eeprom_write_dword((uint32_t *)(MCTCSS*sizeof(uint32_t)),theMenu[MCTCSS].value);
-            break;
-
-        case MSSTART :
-            SS_ScanStartFrequency = theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MSSTART*sizeof(uint32_t)) ,theMenu[MSSTART].value);
-            break;
-
-        case MSEND :
-            SS_ScanEndFrequency= theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MSEND*sizeof(uint32_t)) ,theMenu[MSEND].value);
-            break;
-
-        case MABAUDRATE :
-            SS_BaudrateIndex = theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MABAUDRATE*sizeof(uint32_t)) ,theMenu[MABAUDRATE ].value);
-            break;
-
-        case MAROTARYTYPE :
-            SS_RotaryType = theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MAROTARYTYPE*sizeof(uint32_t)) ,theMenu[MAROTARYTYPE].value);
-            // reset the rotary input system
-            break;
-
-        case MAFRONTENABLE :
-            SS_FrontEnable = theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MAFRONTENABLE*sizeof(uint32_t)),theMenu[MAFRONTENABLE].value);
-            break;
-
-        case MAREMOTEENABLE :
-            SS_RemoteEnable = theMenu[SS_MenuState].value;
-            eeprom_write_dword((uint32_t *)(MAREMOTEENABLE*sizeof(uint32_t)),theMenu[MAREMOTEENABLE].value);
-            break;
-    }
-}
-
-// }}}
-
-// {{{ // Push To Talk
-
-void ProcPTT()
-{
     switch (SS_PTT)
     {
         // activated
@@ -1872,13 +1786,10 @@ void ProcPTT()
     }
 
     SS_TxRxIndicator = (SS_Transmitting) ? 'T' : 'R';
-}
 
-// }}}
-// {{{ // Shift Enable
+    // }}}
+    // {{{ // Shift Enable
 
-void ProcShiftEnable()
-{
     switch (SS_ShiftChange)
     {
         // activated
@@ -1891,18 +1802,13 @@ void ProcShiftEnable()
             SS_ShiftEnable = FALSE;
             break;
     }
-}
 
-// }}}
-// {{{ // SMeter and Squelch 
 
-void ProcSMeterSquelch()
-{
+    // }}}
+    // {{{ // SMeter and Squelch 
+
     if (!SS_Transmitting)
     {
-        // make sure we do net get negative values in the result
-        if (SS_SMeterIn > 980) SS_SMeterIn = 980;
-
         //SS_DisplaySMeter = ((1024-SS_SMeterIn) - 44) >> 1;
         SS_DisplaySMeter = (980 - SS_SMeterIn) >> 1;
 
@@ -1914,40 +1820,33 @@ void ProcSMeterSquelch()
         SS_Muted = (SS_MuteLevel > SS_DisplaySMeter);
     } else {
         SS_Muted = TRUE;
-        SS_DisplaySMeter = 0;
     }
     SS_MuteIndicator = (SS_Muted) ? 'M' : ' ';
-}
 
-// }}}
-// {{{ // Scanner
-
-void ProcScanner()
-{
-    char goStep;  // boolean: indicates it's time for the next scanner step
+    // }}}
+    // {{{ // Scanner
+#ifdef TESTING
     // stop scanning when found a busy channel
     if (!SS_Muted) SS_Scanning = FALSE;
 
     if (SS_Scanning)
     {   
-        uint16_t StepDelay=50; // clock works rougly in centi seconds 
-        currentTime = sysClock();
+        uint16_t StepDelay=125;
+        clock_t now = clock();
+        currentTime = (float)now * 1000.0F / CLOCKS_PER_SEC;
         goStep = (currentTime - prevStepTime) > StepDelay;
         if (goStep)
         {   
             prevStepTime = currentTime;
-            SS_BaseFrequency = SS_BaseFrequency+CHANNELSTEP;
-            if (SS_BaseFrequency > SS_ScanEndFrequency) 
-                SS_BaseFrequency = SS_ScanStartFrequency;
+            SS_BaseFrequency =
+                (SS_BaseFrequency > SS_ScanEndFrequency) ? SS_ScanStartFrequency : SS_BaseFrequency+CHANNELSTEP;
         }
     }   
-}
-
-// }}}
-// {{{ // Frequency Calculations
-
-void ProcFrequencyCalculator(void)
-{
+#else
+    // $$$ FHE TODO
+#endif
+    // }}}
+    // {{{ // Frequency Calculations
     int32_t offset;
 
     SS_VfoFrequency     = SS_BaseFrequency - ((SS_Transmitting) ? 0L : IF);
@@ -1957,54 +1856,9 @@ void ProcFrequencyCalculator(void)
     offset = (SS_ShiftEnable && (SS_Transmitting != SS_ReverseShift)) ? SS_FrequencyShift : 0L;
     SS_VfoFrequency     += offset;
     SS_DisplayFrequency += offset;
-}
-
-// }}}
-
-void ProcessingHandler(void)
-{
-    // {{{ // Rotary Handling
-
-    // Tuning is only allowed during receive
-    if ((!SS_Transmitting) & SS_Tuning)
-        ProcTuning();
-
-    ProcTuneSave();
-
-    if (!SS_Tuning && !SS_ValueEdit)
-        ProcMenuScrolling();
-
-    if (!SS_Tuning && SS_ValueEdit)
-        ProcValueEditing();
 
     // }}}
-    // {{{ // Selector Button
 
-    if (SS_Selected && SS_Tuning && !SS_Transmitting)
-    {
-        SS_Selected = FALSE;            // swallow the selection action
-        ProcSelectDuringTune();
-    }
-
-    if (SS_Selected && !SS_Tuning && !SS_ValueEdit) 
-    {
-        SS_Selected = FALSE;            // swallow the selection action
-        ProcSelectDuringMenu();
-    }
-
-    if (SS_Selected && !SS_Tuning && SS_ValueEdit) 
-    {
-        SS_Selected = FALSE;        // swallow the selection action
-        ProcSelectDuringEdit();
-    }
-
-    // }}} end selector button
-
-    ProcPTT();
-    ProcShiftEnable();
-    ProcSMeterSquelch();
-    ProcScanner();
-    ProcFrequencyCalculator();
 }
 
 // }}} Processing
@@ -2130,26 +1984,26 @@ void OutputSetDisplayFrequency(int32_t freq)
     {
         prevFreq = freq;
 #ifdef TESTING
-        sprintf(LineT, "VFO %4u.%03u MHz", freq/1000, freq%1000);
+        sprintf(Line, "VFO %4u.%03u MHz", freq/1000, freq%1000);
 #else
-        sprintf(LineT, "VFO %4lu.%03lu MHz", freq/1000, freq%1000);
+        sprintf(Line, "VFO %4lu.%03lu MHz", freq/1000, freq%1000);
 #endif
 
 #ifdef TESTING
         // set color to blue
-        printf("\033[34m");
+        if (!AutoTest) printf("\033[34m");
 #endif
         lcdHome();
-        lcdStr16(LineT);
+        lcdStr16(Line);
 #ifdef TESTING
         // reset color to black
-        printf("\033[30m");
+        if (!AutoTest) printf("\033[30m");
 #endif
     }
 }
 
 // }}}
-// {{{ void OutputSetDisplaySMeter(uint16_t sValue)
+// {{{ void OutputSetDisplaySMeter(short sValue)
 
 void OutputSetDisplaySMeter(uint16_t sValue)
 {
@@ -2162,14 +2016,13 @@ void OutputSetDisplaySMeter(uint16_t sValue)
 #define C1  1
 #define C2  2
 #endif
-#define MaxSMeter 39
+#define MaxSMeter 42
 
     if (sValue > MaxSMeter) sValue = MaxSMeter;
     // first position is for the Mute indicator
     // last position is for the TxRx indicator
-    // last but one position is for the Tune indicator
-    // which leaves the (displaywidth - 3) for the S-Meter
-    int8_t n = DISPLAY_WIDTH-3;
+    // which leaves the display (width - 2) for the S-Meter
+    int8_t n = DISPLAY_WIDTH-2;
 
     lcdCursorPosition(1,1); // goto second line
 
@@ -2197,6 +2050,11 @@ void OutputSetDisplaySMeter(uint16_t sValue)
     {
         lcdData(' ');
     }
+    /*
+       sprintf(Line,"  %5d", sValue);
+       lcdCursorPosition(1,1);
+       lcdStr(Line);
+     */
 }
 
 // }}}
@@ -2218,33 +2076,12 @@ void OutputSetDisplayTxRxIndicator(char indicator)
 }
 
 // }}}
-// {{{ void OutputSetDisplayTuneIndicator(char indicator)
-
-// only write to the (slow) display if the indicator
-// really should be updated
-
-void OutputSetDisplayTuneIndicator(char indicator)
-{
-    static char prevIndicator;
-
-    if (prevIndicator != indicator)
-    {
-        prevIndicator = indicator;
-        lcdCursorPosition(1, DISPLAY_WIDTH-2);
-        lcdData(indicator);
-    }
-}
-
-// }}}
 // {{{ void OutputSetDisplayMuteIndicator(char indicator)
 
 void OutputSetDisplayMuteIndicator(char indicator)
 {
-    if (SS_Tuning)
-    {
-        lcdCursorPosition(1,0);  // bottom row, first column;
-        lcdData(indicator); 
-    }
+    lcdCursorPosition(1,0);  // bottom row, first column;
+    lcdData(indicator); 
 } 
 
 // }}}
@@ -2253,19 +2090,11 @@ void OutputSetDisplayMuteIndicator(char indicator)
 
 void TopLinePrinter(uint16_t ix)
 {
-    static char prevLine[DISPLAY_WIDTH+10];
-
     char *prompt = (SS_ValueEdit) ? "  " : "> ";
 
-    sprintf(LineT,"%s%-14s", prompt, theMenu[ix].name);
-
-    // only send to display when something actually changed 
-    if (strcmp(LineT,prevLine) != 0)
-    {
-        lcdHome();
-        lcdStr(LineT);
-        strcpy(prevLine,LineT);
-    } 
+    lcdHome();
+    sprintf(Line,"%s%-14s", prompt, theMenu[ix].name);
+    lcdStr(Line);
 }
 
 // }}}
@@ -2273,7 +2102,6 @@ void TopLinePrinter(uint16_t ix)
 
 void BottomLinePrinter(uint16_t ix)
 {
-    static char prevLine[DISPLAY_WIDTH+10];
     int32_t val;
     int8_t slength = -1;
     uint8_t i;
@@ -2281,23 +2109,25 @@ void BottomLinePrinter(uint16_t ix)
     char *valStr;
     val = theMenu[ix].value;
 
+    // goto bottom line
+    lcdCursorPosition(1,0);
 
     switch (ix)
     {
         case MMUTELEVEL :
-            slength = sprintf(LineB, theMenu[ix].format, prompt, val);
+            slength = sprintf(Line, theMenu[ix].format, prompt, val);
             break;
         case MSSTART :
         case MSEND :
-            slength = sprintf(LineB, theMenu[ix].format, prompt, val/1000, val%1000);
+            slength = sprintf(Line, theMenu[ix].format, prompt, val/1000, val%1000);
             break;
 
         case MCTCSS :
-            slength = sprintf(LineB, theMenu[ix].format, prompt, CtcssTones[val]/10, CtcssTones[val]%10);
+            slength = sprintf(Line, theMenu[ix].format, prompt, CtcssTones[val]/10, CtcssTones[val]%10);
             break;
 
         case MABAUDRATE :
-            slength = sprintf(LineB, theMenu[ix].format, prompt, Baudrates[val]);
+            slength = sprintf(Line, theMenu[ix].format, prompt, Baudrates[val]);
             break;
 
         case MAROTARYTYPE :
@@ -2305,22 +2135,22 @@ void BottomLinePrinter(uint16_t ix)
                 valStr = "Step per pulse";
             else
                 valStr = "Step per cycle";
-            slength = sprintf(LineB, theMenu[ix].format, prompt, valStr);
+            slength = sprintf(Line, theMenu[ix].format, prompt, valStr);
             break;
 
         case MARETURNMODE :
-            slength = sprintf(LineB, theMenu[ix].format, prompt, (SS_DirectMenuReturn) ? "to tuning" : "to menu");
+            slength = sprintf(Line, theMenu[ix].format, prompt, (SS_DirectMenuReturn) ? "to tuning" : "to menu");
             break;
 
         case MAFRONTENABLE :
         case MAREMOTEENABLE :
-            slength = sprintf(LineB, theMenu[ix].format, prompt, (val) ? "Enabled" : "Disabled");
+            slength = sprintf(Line, theMenu[ix].format, prompt, (val) ? "Enabled" : "Disabled");
             break;
 
         case MSHIFT :
         case MAPLLREFMHZ :
         case MAPLLREFKHZ :
-            slength = sprintf(LineB, theMenu[ix].format, prompt, val/1000, val%1000);
+            slength = sprintf(Line, theMenu[ix].format, prompt, val/1000, val%1000);
             break;
 
         default:
@@ -2329,19 +2159,10 @@ void BottomLinePrinter(uint16_t ix)
     if (slength > -1)
     {
         for (i=slength; i<=DISPLAY_WIDTH; i++)
-            LineB[i] = ' ';                  // clear rest of line
-        LineB[i] = (uint8_t)0;               // set string terminator
+            Line[i] = ' ';                  // clear rest of line
+        Line[i] = (uint8_t)0;               // set string terminator
     }
-
-    // only send to display when something actually changed 
-    if (strcmp(LineB,prevLine) != 0)
-    {
-        // goto bottom line
-        lcdCursorPosition(1,0);
-        lcdStr(LineB);
-        strcpy(prevLine,LineB);
-    } 
-
+    lcdStr(Line);
 }
 
 // }}}
@@ -2401,7 +2222,8 @@ void lcdData(char c)
 {
 #ifdef TESTING
     // set color to blue
-    printf("\033[34m");
+    //if (!AutoTest)
+    //    printf("\033[34m");
     deData(c);
 #else
     char t;
@@ -2485,7 +2307,6 @@ void OutputHandler(void)
         OutputSetDisplayFrequency(SS_DisplayFrequency);
         OutputSetDisplaySMeter(SS_DisplaySMeter);
         OutputSetDisplayTxRxIndicator(SS_TxRxIndicator);
-        OutputSetDisplayTuneIndicator(SS_TuneIndicator);
         OutputSetDisplayMuteIndicator(SS_MuteIndicator);
     } else // "not Tuning" means "in menu"
     {
@@ -2499,138 +2320,104 @@ void OutputHandler(void)
     OutputSetVfoFrequency (SS_VfoFrequency);
     OutputSetTransmitterOn(SS_Transmitting);
 
+    // {{{ testing and debugging
+#ifdef TESTING
+
+    if (TRUE)
+    {
+        if (!AutoTest) ttySetCursorPosition(DBGROW,0);
+        if (!AutoTest) printf("\033[37m"); // light gray
+        printf("\n========================= debug ========================"); 
+        NL();
+        printf("CTCSSindex      =      %3d  | ",SS_CtcssIndex);
+        printf("SS_Tuning       =        %d",SS_Tuning);
+        NL();
+        //            printf("inputStateRotary= %8d\n",inputStateRotary);
+
+        printf("CTCSSfrequency  = %8d  | ",SS_CtcssFrequency);
+        printf("SS_MenuState    =     %04X",SS_MenuState ); 
+        NL();
+
+        printf("MuteLevel       = %8d  | ",SS_MuteLevel);
+        printf("SS_ValueEdit    = %8d",SS_ValueEdit);
+        NL();
+
+        printf("ShiftEnable     =      %3s  | ",yesno(SS_ShiftEnable));
+        //printf("menuLoopState T =     %04X",menuLoopState & TYPEMASK); 
+        NL();
+
+        //            printf("LargeEnable     =      %3s  | ",yesno(SS_LargeStepEnable));
+        //            printf("\n");
+
+        printf("FrequencyShift  = %8d  | ",SS_FrequencyShift);
+        printf("BaseFrequency   = %8d",SS_BaseFrequency); 
+        NL();
+
+        printf("Transmitting    =      %3s  | ",yesno(SS_Transmitting));
+        printf("VfoFrequency    = %8d",SS_VfoFrequency);
+        NL();
+
+        printf("Scanning        =      %3s  | ",yesno(SS_Scanning));
+        printf("SS_PllReference = %4u.%03u", SS_PllReferenceFrequency/1000, SS_PllReferenceFrequency%1000);
+        NL();
+
+        printf("Scan Start      = %4u.%03u  | ", SS_ScanStartFrequency/1000, SS_ScanStartFrequency%1000);
+        printf("Scan End        = %4u.%03u", SS_ScanEndFrequency/1000, SS_ScanEndFrequency%1000);
+        NL();
+
+        printf("SS_SMeterIn     =    %5d  | ", (int)SS_SMeterIn);
+        printf("SS_DisplaySMeter=    %5d", (int)SS_DisplaySMeter);
+        NL();
+
+        printf("SS_RotaryCount  =    %5d  | ", SS_RotaryCount);
+        printf("SS_Selected     =        %1d", SS_Selected);
+        NL();
+
+        printf("tmpFreqChanged  =    %5d  | ", tmpFreqChanged);
+        printf("tmpFreqSaved    =    %5d ", tmpFreqSaved);
+        NL();
+
+        // printf("lastFrequencyChange= %8lu ",lastFrequencyChange);
+        // printf("now                = %8lu",now);
+        // NL();
+        // printf("clocks per sec = %d ",CLOCKS_PER_SEC);
+        // NL();
+
+        // printf("ctcssIndex      = %8d\n",ctcssIndex);
+        // printf("vInRotState     = %8d\n",vInRotState);
+        // printf("keypressed  = %8X\n",theKey);
+        // printf("unget charvail  = %8s\n",yesno(GetcAvail));
+        printf("========================================================\n"); NL();
+        if (!AutoTest) printf("\033[30m"); // black
+    }
+    else
+    {
+        deSetCursorPosition(DBGROW,1);
+    }
+#endif
+    // }}}
 }
 
 // }}} Output handling
 
 // }}}
 
-// {{{  Main
-
-#ifdef TESTING
-#include "TEST_framework.c"
-int results;
-#endif
-
 // {{{ void mainLoop(void)
 
 void mainLoop(void)
 {
     char busy = TRUE;
-
     while (busy)
     {
         busy = InputHandler();
         RemoteControlHandler();
-
-        // {{{ Testing
-#ifdef TESTING
-        if (AutoTest)
-        {
-            testNr = TEST_GetNextTest(testNr);
-            //printf("testnr=%d\n",testNr);
-            if (testNr==-1) 
-            {
-                busy=FALSE;
-                break;
-            }
-            TEST_SetInputs(testNr); 
-        }
-#endif
-        // }}}
-
         ProcessingHandler();
         OutputHandler();        
 
-        // {{{ Testing and debugging
+        tbi(PORTB, 2); // for measuring loop timing
 
-#ifdef TESTING
-        if (AutoTest)
-        {
-            results = TEST_ExpectResults(testNr);
-            TEST_Log(testNr, results);
-        }
-
-        if (TRUE)
-        {
-            ttySetCursorPosition(DBGROW,0);
-            printf("\033[37m"); // light gray
-            printf("\n========================= debug ========================"); 
-            NL();
-            printf("CTCSSindex      =      %3d  | ",SS_CtcssIndex);
-            printf("SS_Tuning       =        %d",SS_Tuning);
-            NL();
-            //            printf("inputStateRotary= %8d\n",inputStateRotary);
-
-            printf("CTCSSfrequency  = %8d  | ",SS_CtcssFrequency);
-            printf("SS_MenuState    =     %04X",SS_MenuState ); 
-            NL();
-
-            printf("MuteLevel       = %8d  | ",SS_MuteLevel);
-            printf("SS_ValueEdit    = %8d",SS_ValueEdit);
-            NL();
-
-            printf("ShiftEnable     =      %3s  | ",yesno(SS_ShiftEnable));
-            //printf("menuLoopState T =     %04X",menuLoopState & TYPEMASK); 
-            NL();
-
-            printf("SS_FastTune     =      %3s  | ",yesno(SS_FastTune));
-            printf("stepsCounter    = %8d",stepsCounter);
-            NL();
-
-            printf("FrequencyShift  = %8d  | ",SS_FrequencyShift);
-            printf("BaseFrequency   = %8d",SS_BaseFrequency); 
-            NL();
-
-            printf("Transmitting    =      %3s  | ",yesno(SS_Transmitting));
-            printf("VfoFrequency    = %8d",SS_VfoFrequency);
-            NL();
-
-            printf("Scanning        =      %3s  | ",yesno(SS_Scanning));
-            printf("SS_PllReference = %4u.%03u", SS_PllReferenceFrequency/1000, SS_PllReferenceFrequency%1000);
-            NL();
-
-            printf("Scan Start      = %4u.%03u  | ", SS_ScanStartFrequency/1000, SS_ScanStartFrequency%1000);
-            printf("Scan End        = %4u.%03u", SS_ScanEndFrequency/1000, SS_ScanEndFrequency%1000);
-            NL();
-
-            printf("SS_SMeterIn     =    %5d  | ", (int)SS_SMeterIn);
-            printf("SS_DisplaySMeter=    %5d", (int)SS_DisplaySMeter);
-            NL();
-
-            printf("SS_RotaryCount  =    %5d  | ", SS_RotaryCount);
-            printf("SS_Selected     =        %1d", SS_Selected);
-            NL();
-
-            printf("tmpFreqChanged  =    %5d  | ", tmpFreqChanged);
-            printf("tmpFreqSaved    =    %5d ", tmpFreqSaved);
-            NL();
-
-            printf("testNr          =    %5d  | ", testNr);
-            NL();
-
-            printf("stepTime        =    %5u  | ",stepTime);
-            NL();
-
-            // printf("ctcssIndex      = %8d\n",ctcssIndex);
-            // printf("vInRotState     = %8d\n",vInRotState);
-            // printf("keypressed  = %8X\n",theKey);
-            // printf("unget charvail  = %8s\n",yesno(GetcAvail));
-            printf("========================================================\n"); NL();
-            printf("\033[30m"); // black
-        }
-        else
-        {
-            deSetCursorPosition(DBGROW,1);
-        }
-#endif
-        // }}}
     }
-
-    // $$$ DEBUG
-    tbi(PORTB, 2); // for measuring loop timing
 }
-
 
 // }}}
 // {{{ int main(int argc, char *argv[])
@@ -2644,26 +2431,24 @@ int main(int argc, char *argv[])
     {
         if (strcmp(argv[1],"-a") == 0)
             AutoTest = TRUE;
-        if (strcmp(argv[1],"-t") == 0)
-            AutoTest = TRUE;
         if (strcmp(argv[1],"-d") == 0)
             dbg_logging = TRUE;
     }
 
-    TEST_Initialize();
-
-    ttyClearScreen();
-    ttySetCursorPosition(0,0);
-    printf("========= 23cm NBFM control software simulator =========\n");
-    printf("\n");
-    printf("q quit\n"); 
-    printf("[ downward rotating         ] upward rotating\n"); 
-    printf("t transmit                  r receive\n"); 
-    printf("s shift on                  a shift off\n");
-    printf("e menu selector button      l toggle large steps on/off\n"); 
-    printf("\n");
-    set_conio_terminal_mode();
-
+    if (!AutoTest)
+    {
+        ttyClearScreen();
+        ttySetCursorPosition(0,0);
+        printf("========= 23cm NBFM control software simulator =========\n");
+        printf("\n");
+        printf("q quit\n"); 
+        printf("[ downward rotating         ] upward rotating\n"); 
+        printf("t transmit                  r receive\n"); 
+        printf("s shift on                  a shift off\n");
+        printf("e menu selector button      l toggle large steps on/off\n"); 
+        printf("\n");
+        set_conio_terminal_mode();
+    }
     if (dbg_logging) dbg = fopen("log.txt","w");
 #endif
 
@@ -2682,9 +2467,9 @@ int main(int argc, char *argv[])
 
     if (dbg_logging) fclose(dbg);
     // position cursor below lowest printed line
-    ttySetCursorPosition(14,0);
+    if (!AutoTest) ttySetCursorPosition(27,0);
     // cursor back on
-    printf("\033[?25h");   
+    if (!AutoTest) printf("\033[?25h");   
     // short i;
     // for (i=0x20; i<255; i++) printf("%X-%c ", i,i);
 #endif
@@ -2693,6 +2478,10 @@ int main(int argc, char *argv[])
 }
 
 // }}}
+
+// {{{ 
+
+
 
 // }}}
 // EOF

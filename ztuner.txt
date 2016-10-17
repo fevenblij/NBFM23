@@ -1,0 +1,19 @@
+
+tune:
+  steps => normal, as is
+  channel => predefined memory channels
+
+add menu option
+  save current freq(frequecy, shift, ctcss) in channel (nr)
+
+add menu option
+  tune mode
+  1) steps 25 kHz   => scanmode SS_SCANMODE=SM_STEP
+  2) memory channel => scanmode SS_SCANMODE=SM_CHANNEL
+
+
+ProcTune
+kent nu fast and slow tuning
+maak dit een functie die ook aangeroepen kan worden vanuit de
+set begin en end scan frequency
+
