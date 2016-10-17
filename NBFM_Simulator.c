@@ -134,6 +134,10 @@
 #define MINSHIFT            -60000L
 #define MAXSHIFT            60000L
 
+#define SM_NONE             0
+#define SM_STEP             1
+#define SM_CHANNEL          2
+
 #define SELECTBOUNCEDELAY   1   // mainloop cycle time = 34 ms.
 
 #ifdef TESTING
@@ -401,6 +405,8 @@ const uint8_t ctcssLength = (sizeof(CtcssTones)/sizeof(uint16_t))-2;
 uint32_t Baudrates[] = { 1200, 2400, 4800, 9600, 19200, 38400, 76800, 115600 };
 uint8_t baudrateLength = 8 - 1;
 
+const uint32_t ScanResumeDelay=1000;         // how long before started scanning on a mute channel
+
 // }}} /end constants
 // {{{ Globals
     static int8_t stepsCounter;
@@ -418,8 +424,9 @@ char        SS_FastTune;                // boolean: tune steps per MHz when true
 char        SS_MemoryChannel;           // boolean: step through the memory channels when true;
 char        SS_Transmitting;            // boolean: TX = true, RX = false;
 char        SS_Scanning;                // boolean: scanning = true;
+char        SS_ScanMode;                // int: 0 = not scanning, 1 =
 char        SS_Muted;                   // boolean: TRUE=audio muted, FALSE=audio on 
-char        SS_ShiftChange;             // int: 0=no change, 1 = actived, 2 = deactivated
+char        SS_ShiftChange;             // int: 0 = no change, 1 = actived, 2 = deactivated
 char        SS_ShiftEnable;             // boolean: shifted = true;
 char        SS_ReverseShift;            // boolean: swap transmit and receive frequencies = true
 uint32_t    SS_CtcssFrequency;          // the tone value to inject
@@ -464,8 +471,10 @@ char  dbg_logging=FALSE;     // set to true via commandline when we need debug l
 short goingUp;               // tmp global
 short LoopCounter;           // tmp global
 short cpos;                  // display: lineair cursor position
+int   simuls;                // simulated S-meter value
 #endif
 
+uint32_t channelCloseTime;   // when larger then scan-resume-delay, resume the scanning action.
 uint32_t currentTime;        // tmp global
 uint32_t prevStepTime;       // tells scanner when it is time for the next channel
 uint32_t lastFrequencyChange;// keeps track of time since last tuning action
@@ -724,7 +733,7 @@ void initLCD(void)
     _delay_ms(40);
 
     //              0123456789ABCDEF
-    char hello[] = "PA3BJI sw v0.6  ";
+    char hello[] = "PA3BJI sw v0.7  ";
     lcdStr16(hello);
     _delay_ms(500);
 }
@@ -825,31 +834,11 @@ void readPersistentStorage(void)
         fread((int32_t *)&theMenu[(int)i].value,1,sizeof(int32_t), eeprom);
     }
 #else
-
-#if 0
-    theMenu[(int)0x00].value = eeprom_read_dword((uint32_t *) (0x00*sizeof(uint32_t)));
-    theMenu[(int)0x01].value = eeprom_read_dword((uint32_t *) (0x01*sizeof(uint32_t)));
-    theMenu[(int)0x02].value = eeprom_read_dword((uint32_t *) (0x02*sizeof(uint32_t)));
-    theMenu[(int)0x03].value = eeprom_read_dword((uint32_t *) (0x03*sizeof(uint32_t)));
-    theMenu[(int)0x04].value = eeprom_read_dword((uint32_t *) (0x04*sizeof(uint32_t)));
-    theMenu[(int)0x05].value = eeprom_read_dword((uint32_t *) (0x05*sizeof(uint32_t)));
-    theMenu[(int)0x06].value = eeprom_read_dword((uint32_t *) (0x06*sizeof(uint32_t)));
-    theMenu[(int)0x07].value = eeprom_read_dword((uint32_t *) (0x07*sizeof(uint32_t)));
-    theMenu[(int)0x08].value = eeprom_read_dword((uint32_t *) (0x08*sizeof(uint32_t)));
-    theMenu[(int)0x09].value = eeprom_read_dword((uint32_t *) (0x09*sizeof(uint32_t)));
-    theMenu[(int)0x0A].value = eeprom_read_dword((uint32_t *) (0x0A*sizeof(uint32_t)));
-    theMenu[(int)0x0B].value = eeprom_read_dword((uint32_t *) (0x0B*sizeof(uint32_t)));
-    theMenu[(int)0x0C].value = eeprom_read_dword((uint32_t *) (0x0C*sizeof(uint32_t)));
-    theMenu[(int)0x0D].value = eeprom_read_dword((uint32_t *) (0x0D*sizeof(uint32_t)));
-    theMenu[(int)0x0E].value = eeprom_read_dword((uint32_t *) (0x0E*sizeof(uint32_t)));
-    theMenu[(int)0x0F].value = eeprom_read_dword((uint32_t *) (0x0F*sizeof(uint32_t)));
-#else
     uint8_t i;
     for (i=0; i<16; i++)
     {
         theMenu[i].value = eeprom_read_dword((uint32_t *)(i*sizeof(uint32_t)));
     }
-#endif
 #endif
 
 #define inbetween(v, a, b) (!((v < a) || (v > b)))
@@ -952,7 +941,8 @@ uint32_t sysClock(void)
 #ifdef TESTING
     // posix clock works in uS
     // dividing by 10000 converts to centiseconds
-    rv = clock() / 10000L;
+    //rv = clock() / 10000L;
+    rv = clock() / 5000L;
 #else
     // Atmel timer setup uses approximate centiseconds
     ATOMIC_BLOCK(ATOMIC_FORCEON)
@@ -1391,19 +1381,18 @@ char InputGetShiftEnable(void)
 uint16_t InputGetSMeter(void)
 {
 #ifdef TESTING
-    static int simuls;
-    static int delay;
+    // static int delay;
     static char rising;
     static int hoog=980;
     static int laag=980-84;   // = 896 as lowest value 
 
-    if (SS_Tuning && (delay++ > 320))
-    {
-        delay = 0;
-        if (rising) simuls++; else simuls--;
-        if (simuls>hoog) { simuls=hoog; rising=FALSE; }
-        if (simuls<laag) { simuls=laag; rising=TRUE; }
-    }
+    //    if (SS_Tuning && (delay++ > 320))
+    //    {
+    //        delay = 0;
+    //        if (rising) simuls++; else simuls--;
+    if (simuls>hoog) { simuls=hoog; rising=FALSE; }
+    if (simuls<laag) { simuls=laag; rising=TRUE; }
+    //    }
     return simuls;
 #else
     // set AD Start Conversion bit and AD ENable bit
@@ -1483,6 +1472,14 @@ char InputHandler(void)
                        theKey = c;
                        break;
 
+            case 'm' : simuls += 10;
+                       theKey = c;
+                       break;
+
+            case 'M' : simuls -= 10;
+                       theKey = c;
+                       break;
+
             default:
                        // swallow unused input characters by 
                        // calling the non-blocking FHEgetc();
@@ -1529,16 +1526,11 @@ void ProcTuning(void)
             }
         }
 
-        // if tuning slows down, fall back to 
-        // small steps after 3 slow tunes
-        if ((currentTime-lastFrequencyChange) > 15) 
+        // if no tuning for 1 second, go back to slow tune
+        if ((currentTime-lastFrequencyChange) > 10) 
         {
-            stepsCounter--;
-            if (stepsCounter < 0) 
-            {
-                SS_FastTune = FALSE;
-                stepsCounter = 0;
-            }
+            SS_FastTune = FALSE;
+            stepsCounter = 0;
         }
 
         // Handle the tune pulses
@@ -1771,6 +1763,7 @@ void ProcSelectDuringMenu(void)
 
         case MSCAN :
             SS_Tuning = TRUE;   // switch to tuning mode
+            SS_ScanMode = SM_STEP; // goto to step scanning mode
             SS_Scanning = TRUE; // and go to scanning mode
             prevFreq = 0L;      // force update of freq display
             break;
@@ -1863,6 +1856,7 @@ void ProcPTT()
             SS_Transmitting = TRUE;
             // if we are scanning, then stop now!
             SS_Scanning = FALSE;
+            SS_ScanMode = SM_NONE;
             break;
 
             // released
@@ -1898,6 +1892,8 @@ void ProcShiftEnable()
 
 void ProcSMeterSquelch()
 {
+    static char prevMute;
+
     if (!SS_Transmitting)
     {
         // make sure we do net get negative values in the result
@@ -1911,7 +1907,16 @@ void ProcSMeterSquelch()
         SS_DisplaySMeter >>= 1;
         LowPass = SS_DisplaySMeter;
 
+        prevMute = SS_Muted;
         SS_Muted = (SS_MuteLevel > SS_DisplaySMeter);
+
+        // see if audio just went quiet
+        if (SS_ScanMode != SM_NONE)
+            if ((SS_Muted) && (!prevMute))
+            {
+                // timestamp of squelch activation
+                channelCloseTime = sysClock();
+            }
     } else {
         SS_Muted = TRUE;
         SS_DisplaySMeter = 0;
@@ -1924,14 +1929,21 @@ void ProcSMeterSquelch()
 
 void ProcScanner()
 {
+    uint32_t inactivity;
     char goStep;  // boolean: indicates it's time for the next scanner step
+
+
+    // only read and save timestamp when really usefull
+    if (SS_ScanMode != SM_NONE)
+        currentTime = sysClock();
+
     // stop scanning when found a busy channel
     if (!SS_Muted) SS_Scanning = FALSE;
 
     if (SS_Scanning)
     {   
+        channelCloseTime = currentTime; // keep inactivity at 0
         uint16_t StepDelay=50; // clock works rougly in centi seconds 
-        currentTime = sysClock();
         goStep = (currentTime - prevStepTime) > StepDelay;
         if (goStep)
         {   
@@ -1940,7 +1952,19 @@ void ProcScanner()
             if (SS_BaseFrequency > SS_ScanEndFrequency) 
                 SS_BaseFrequency = SS_ScanStartFrequency;
         }
-    }   
+    } else
+    {
+        if (SS_ScanMode != SM_NONE)                     // if we have a scan mode set
+        {
+            if (SS_Muted)                               // and the channel is quiet
+            {
+                inactivity = currentTime - channelCloseTime;
+                if (inactivity > ScanResumeDelay)       // and channel has been quiet for a while
+                    SS_Scanning = TRUE;                 // then resume scanning
+            } else
+                channelCloseTime = currentTime; // keep inactivity at 0
+        }
+    }
 }
 
 // }}}
@@ -2017,6 +2041,7 @@ void ProcessingHandler(void)
 
 void OutputSetAudioMute(char mute)
 {
+
     // boolean mute;
     static char prevMute;
 
@@ -2610,6 +2635,10 @@ void mainLoop(void)
             NL();
 
             printf("stepTime        =    %5u  | ",stepTime);
+            NL();
+
+            printf("Inactivity time =    %5u  | ",currentTime - channelCloseTime) ;
+            printf("ScanResumeDelay =    %5d ", ScanResumeDelay);
             NL();
 
             // printf("ctcssIndex      = %8d\n",ctcssIndex);
